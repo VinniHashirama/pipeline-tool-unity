@@ -2,102 +2,136 @@
 
 Unity Editor window for listing and importing approved 3D assets from Pipeline Tool.
 
-## Requirements
+- **Package name:** `com.antigravity.pipeline-tool`
+- **Repository:** https://github.com/VinniHashirama/pipeline-tool-unity
+- **Minimum Unity:** 2021.3 LTS
 
-- Unity 2021.3 LTS or newer
-- Pipeline Tool web app running (local or hosted)
+---
 
 ## Installation
 
-### Option A — Local path (development, no Git required)
+### Via Package Manager UI (recomendado)
 
-In your Unity project, open `Packages/manifest.json` and add:
+Abra **Window > Package Manager** no Unity, clique no botão **+** no canto superior esquerdo e escolha uma das opções abaixo.
 
+---
+
+#### Opção 1 — Git URL (direto do GitHub)
+
+No Package Manager, escolha **"Add package from git URL…"** e cole:
+
+```
+https://github.com/VinniHashirama/pipeline-tool-unity.git
+```
+
+Isso sempre instala o commit mais recente do `main`. Para fixar em uma versão específica, adicione `#tag` ao final:
+
+```
+https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0
+```
+
+> Cada release deve ter uma tag `v<semver>` no repositório. Veja a seção **Versionamento** abaixo.
+
+---
+
+#### Opção 2 — Pasta local (desenvolvimento)
+
+No Package Manager, escolha **"Add package from disk…"** e navegue até o arquivo `package.json` dentro da pasta `unity-package/` clonada localmente.
+
+---
+
+### Via `Packages/manifest.json` (alternativa manual)
+
+Abra `Packages/manifest.json` do seu projeto Unity e adicione à seção `"dependencies"`:
+
+**Git URL (pinado):**
 ```json
 {
   "dependencies": {
-    "com.antigravity.pipeline-tool": "file:C:/path/to/PipelineTool/unity-package"
+    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0"
   }
 }
 ```
 
-Use the absolute path to the `unity-package/` folder on your machine.
-The package reloads automatically whenever you save a script inside it.
-
-### Option B — GitHub URL with subfolder (staging / QA project)
-
+**Git URL (sempre latest main — use só em dev):**
 ```json
 {
   "dependencies": {
-    "com.antigravity.pipeline-tool": "https://github.com/YOUR_ORG/PipelineTool.git?path=/unity-package#unity/v0.1.0"
+    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git"
   }
 }
 ```
 
-- `?path=/unity-package` tells UPM which subfolder is the package root.
-- `#unity/v0.1.0` pins a specific tag. Omit it to track the latest commit on the default branch (not recommended for QA).
-- Unity will clone the full repository but only surface the `unity-package/` folder as a package.
-
-> **Tag convention:** use `unity/v<semver>` for package releases to distinguish them from web app release tags.
-
-## Configuration
-
-1. Open **Pipeline Tool > Import Window** in the Unity menu bar.
-2. Go to the **Settings** tab.
-3. Fill in:
-   - **API Base URL** — e.g. `http://localhost:3000` or your Vercel URL.
-   - **Supabase Anon Key** — found in Supabase Dashboard → Project Settings → API.
-   - **Pipeline API Key** — optional; only needed if the server validates `X-Pipeline-Key`. See note below.
-   - **Project ID** — UUID of the Pipeline Tool project to filter by (optional).
-   - **Target Folder** — where downloaded files land, e.g. `Assets/ImportedAssets`.
-4. Click **Save Settings**. Values are stored in `EditorPrefs` (per-user, per-machine).
-
-### Authentication note
-
-The current server API validates user sessions via `supabase.auth.getUser()`.
-The Supabase Anon Key is **not** a user session token — sending it as a Bearer token will return 401.
-
-Two paths to fix this before the tool can reach the server:
-
-**Path 1 (recommended):** Add a simple API key check to the server:
-
-```typescript
-// In each API route, replace the auth check with:
-const pipelineKey = request.headers.get('X-Pipeline-Key')
-if (pipelineKey !== process.env.UNITY_TOOL_API_KEY) {
-  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+**Caminho local (para contribuição ativa no package):**
+```json
+{
+  "dependencies": {
+    "com.antigravity.pipeline-tool": "file:C:/caminho/absoluto/para/unity-package"
+  }
 }
 ```
 
-Add `UNITY_TOOL_API_KEY=<random-secret>` to `.env.local` and paste the same value into the **Pipeline API Key** field in Settings.
+No Windows use barras normais `/` ou barras duplas `\\`. O UPM recarrega automaticamente quando você salva um arquivo dentro da pasta.
 
-**Path 2:** Authenticate with a dedicated service account; the tool would need a login flow to exchange email/password for a session JWT.
+---
 
-## Usage
+## Configuração
 
-1. Go to the **Assets** tab and click **Refresh**.
-2. The list shows all tasks with status `approved` from Pipeline Tool.
-3. Click **Import** on a row to:
-   - Download the file to the configured target folder.
-   - Trigger an `AssetDatabase` refresh (Unity imports the file automatically).
-   - Call `PATCH /api/assets/{id}/mark-imported`, transitioning the task to `imported`.
+1. Abra **Pipeline Tool > Import Window** na barra de menus do Unity.
+2. Vá para a aba **Settings**.
+3. Preencha os campos:
 
-## Repository structure
+| Campo | Descrição |
+|---|---|
+| API Base URL | `http://localhost:3000` (dev) ou a URL do Vercel (prod) |
+| Supabase Anon Key | Supabase Dashboard → Project Settings → API → `anon public` |
+| Pipeline API Key | Valor de `UNITY_TOOL_API_KEY` configurado no servidor |
+| Project ID | UUID do projeto no Pipeline Tool (opcional — filtra assets) |
+| Target Folder | Pasta destino dentro do projeto Unity, ex: `Assets/ImportedAssets` |
+
+4. Clique em **Save Settings**. Os valores ficam no `EditorPrefs` — por usuário, por máquina, nunca commitados.
+
+---
+
+## Uso
+
+1. Na aba **Assets**, clique em **Refresh** para buscar os assets com status `approved`.
+2. Clique em **Import** em qualquer linha para:
+   - Baixar o arquivo para a pasta configurada.
+   - Disparar o `AssetDatabase.ImportAsset` (Unity importa automaticamente).
+   - Chamar `PATCH /api/assets/{id}/mark-imported` → task vira `imported` e notificação Slack é enviada.
+
+---
+
+## Versionamento
+
+Este package usa tags `v<semver>` independentes do web app:
+
+```bash
+# Depois de alterar e fazer push no main:
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+No Unity, atualize a referência em `manifest.json` para `#v0.2.0` e salve — o Package Manager baixa a nova versão automaticamente.
+
+---
+
+## Estrutura do package
 
 ```
-PipelineTool/
-├── pipeline-tool/          Next.js web app
-└── unity-package/          This UPM package
-    ├── package.json
-    ├── Editor/
-    │   ├── PipelineTool.Editor.asmdef
-    │   └── Scripts/
-    │       ├── Models/
-    │       │   ├── ApprovedAsset.cs
-    │       │   └── ImportResult.cs
-    │       ├── PipelineSettings.cs
-    │       ├── PipelineApiClient.cs
-    │       ├── AssetDownloader.cs
-    │       └── PipelineImportWindow.cs
-    └── README.md
+com.antigravity.pipeline-tool/
+├── package.json
+├── CHANGELOG.md
+├── README.md
+└── Editor/
+    ├── PipelineTool.Editor.asmdef
+    └── Scripts/
+        ├── Models/
+        │   ├── ApprovedAsset.cs     — response shape de GET /api/assets/approved
+        │   └── ImportResult.cs      — response shape de PATCH /mark-imported
+        ├── PipelineSettings.cs      — EditorPrefs (URL, keys, pasta destino)
+        ├── PipelineApiClient.cs     — chamadas HTTP assíncronas via UnityWebRequest
+        ├── AssetDownloader.cs       — download do arquivo + AssetDatabase refresh
+        └── PipelineImportWindow.cs  — EditorWindow: abas Assets e Settings
 ```
