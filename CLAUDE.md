@@ -25,52 +25,90 @@ Editor/
     └── PipelineImportWindow.cs     — EditorWindow: Assets tab + Settings tab
 ```
 
-## Adding to a Unity project
+## Dev workflow — IMPORTANTE
 
-**Local (development)** — edit `Packages/manifest.json`:
-```json
-"com.antigravity.pipeline-tool": "file:C:/absolute/path/to/unity-package"
+**Nunca desenvolva o package com ele instalado via Git URL.** A pasta de cache do UPM é imutável — o Unity não consegue gerar `.meta` files lá, resultando em erros de importação.
+
+O ciclo correto é sempre:
+
+```
+1. Editar arquivos no package (VS Code, Rider, etc.)
+2. Abrir o projeto Dev no Unity (instalado via file:)
+3. Unity detecta mudanças e compila automaticamente
+4. Ao criar arquivos novos → Unity gera os .meta correspondentes
+5. Testar na Engine
+6. git add . && git commit (inclui os .meta novos)
+7. git push
+8. Se for release: git tag v0.x.0 && git push origin v0.x.0
 ```
 
-**GitHub (staging/QA)** — edit `Packages/manifest.json`:
+### Por que os `.meta` files precisam estar no repo
+
+O Unity usa GUIDs nos `.meta` para referenciar assets internamente. Sem eles, o package instalado via Git URL mostra erro:
+```
+Asset has no meta file, but it's in an immutable folder. The asset will be ignored.
+```
+
+O `.gitignore` deste repo já está configurado para **não ignorar** `.meta` files — isso é intencional.
+
+### Estrutura de projetos Unity recomendada
+
+```
+d:\Projects\
+├── PipelineTool\               ← workspace com os dois repos
+│   ├── unity-package\          ← repo do package (file: aponta aqui)
+│   └── pipeline-tool\          ← repo web
+└── PipelineTool-Unity-Dev\     ← projeto Unity (fora do workspace, não vai pro Git)
+    └── Packages\
+        └── manifest.json       ← "com.antigravity.pipeline-tool": "file:..."
+```
+
+O projeto Dev não precisa estar no Git — é uma sandbox local para validar antes de taggear.
+
+### Ao criar novos arquivos no package
+
+```bash
+# 1. Crie o arquivo (no VS Code / Rider)
+# 2. Abra o projeto Dev no Unity — ele vai gerar o .meta automaticamente
+# 3. Verifique que o .meta aparece no git status
+git status   # deve aparecer NomeDoArquivo.cs.meta como untracked
+git add NomeDoArquivo.cs NomeDoArquivo.cs.meta
+git commit -m "feat: ..."
+```
+
+Nunca commite um `.cs` sem o `.meta` correspondente.
+
+## Instalação em outros projetos
+
+**Local (desenvolvimento)** — `Packages/manifest.json`:
+```json
+"com.antigravity.pipeline-tool": "file:C:/caminho/absoluto/para/unity-package"
+```
+
+**Git URL pinado (QA / produção)** — `Packages/manifest.json`:
 ```json
 "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0"
 ```
 
-Use `#main` to track the tip of main (no pin). Use a tag like `#v0.1.0` to pin a release.
+**Via Package Manager UI:** `+` → *Add package from git URL* → cole a URL acima.
 
-## Configuration
+## Configuração
 
 Open **Pipeline Tool > Import Window** → Settings tab:
 
-| Field | Description |
+| Campo | Descrição |
 |---|---|
-| API Base URL | `http://localhost:3000` for dev, Vercel URL for prod |
+| API Base URL | `http://localhost:3000` (dev) ou URL Vercel (prod) |
 | Supabase Anon Key | Supabase Dashboard → Project Settings → API |
-| Pipeline API Key | Value of `UNITY_TOOL_API_KEY` on the server (preferred auth) |
-| Project ID | UUID of the Pipeline Tool project to filter (optional) |
-| Target Folder | Where downloaded files land, e.g. `Assets/ImportedAssets` |
+| Pipeline API Key | Valor de `UNITY_TOOL_API_KEY` configurado no servidor web |
+| Project ID | UUID do projeto no Pipeline Tool (opcional — filtra assets) |
+| Target Folder | Pasta destino, ex: `Assets/ImportedAssets` |
 
-Settings are stored in `EditorPrefs` — per-user, per-machine. Never committed.
-
-## Authentication — known issue
-
-The current server routes call `supabase.auth.getUser()` which requires a user session JWT.
-Sending the Supabase Anon Key as Bearer returns 401.
-
-**Fix required in `pipeline-tool-web`** — both route handlers need to accept `X-Pipeline-Key`:
-```typescript
-const key = request.headers.get('X-Pipeline-Key')
-if (key !== process.env.UNITY_TOOL_API_KEY) {
-  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-}
-```
-
-Until this is implemented, the Import Window will return 401 on Refresh/Import.
+Settings ficam no `EditorPrefs` — por usuário, por máquina. Nunca commitados.
 
 ## Release tags
 
-Use `v<semver>` tags, e.g. `v0.1.0`. Always bump `version` in `package.json` before tagging.
+Sempre bump `version` em `package.json` antes de taggear.
 
 ```bash
 git tag v0.1.0

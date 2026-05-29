@@ -25,3 +25,5 @@ Thumbs.db
 # JetBrains Rider
 .idea/
 ExportedObj/
+*.approj
+*.approj.meta
