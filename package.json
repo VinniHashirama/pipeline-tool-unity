@@ -1,0 +1,16 @@
+{
+  "name": "com.antigravity.pipeline-tool",
+  "version": "0.1.0",
+  "displayName": "Pipeline Tool — Import Client",
+  "description": "Unity Editor window for listing and importing approved 3D assets from Pipeline Tool.",
+  "unity": "2021.3",
+  "documentationUrl": "",
+  "changelogUrl": "",
+  "licensesUrl": "",
+  "dependencies": {},
+  "keywords": ["pipeline", "import", "asset-management"],
+  "author": {
+    "name": "Anti Gravity Projects",
+    "email": "vinicius.nascimento@arvore.io"
+  }
+}
