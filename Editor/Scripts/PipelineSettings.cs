@@ -2,11 +2,18 @@ using UnityEditor;
 
 namespace AntiGravity.PipelineTool.Editor
 {
+    internal enum ServerEnvironment { Local, Production, Custom }
+
     internal static class PipelineSettings
     {
         // Connection
-        private const string KeyApiUrl       = "PipelineTool.ApiBaseUrl";
+        private const string KeyServerEnv    = "PipelineTool.ServerEnvironment";
+        private const string KeyCustomApiUrl = "PipelineTool.CustomApiUrl";
         private const string KeyImportPath   = "PipelineTool.ImportTargetPath";
+
+        // Update ProductionApiUrl after deploying to Vercel
+        internal const string LocalApiUrl      = "http://localhost:3000";
+        internal const string ProductionApiUrl = "https://pipeline-tool.vercel.app";
 
         // Selected project (set after login via dropdown)
         private const string KeyProjectId    = "PipelineTool.ProjectId";
@@ -27,10 +34,29 @@ namespace AntiGravity.PipelineTool.Editor
         // ------------------------------------------------------------------ //
         // Connection
 
+        public static ServerEnvironment SelectedEnvironment
+        {
+            get => (ServerEnvironment)EditorPrefs.GetInt(KeyServerEnv, (int)ServerEnvironment.Local);
+            set => EditorPrefs.SetInt(KeyServerEnv, (int)value);
+        }
+
+        public static string CustomApiUrl
+        {
+            get => EditorPrefs.GetString(KeyCustomApiUrl, "");
+            set => EditorPrefs.SetString(KeyCustomApiUrl, value);
+        }
+
         public static string ApiBaseUrl
         {
-            get => EditorPrefs.GetString(KeyApiUrl, "http://localhost:3000");
-            set => EditorPrefs.SetString(KeyApiUrl, value);
+            get
+            {
+                switch (SelectedEnvironment)
+                {
+                    case ServerEnvironment.Production: return ProductionApiUrl;
+                    case ServerEnvironment.Custom:     return CustomApiUrl;
+                    default:                           return LocalApiUrl;
+                }
+            }
         }
 
         public static string ImportTargetPath

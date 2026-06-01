@@ -115,9 +115,11 @@ Abra **Pipeline Tool > Import Window**. Na primeira abertura, o tool exibe uma t
 
 | Campo | Descrição |
 |---|---|
+| Server | Dropdown: **Local** (localhost:3000) · **Production** (URL Vercel) · **Custom** (campo livre) |
 | Email | Email da conta no Pipeline Tool (mesma usada na web app) |
 | Password | Senha da conta |
 
+O picker de servidor aparece **antes** do login — permite escolher o ambiente sem precisar logar primeiro.
 Após login, o tool busca automaticamente os projetos do usuário e exibe um dropdown na aba Settings.
 
 ### Aba Settings (após login)
@@ -125,9 +127,11 @@ Após login, o tool busca automaticamente os projetos do usuário e exibe um dro
 | Campo | Descrição |
 |---|---|
 | Signed in as | Nome do usuário logado + botão **Sign Out** |
-| API Base URL | `http://localhost:3000` (dev) ou URL Vercel (prod) |
+| Server | Mesmo picker da tela de login — alterável também após logar |
 | Project | Dropdown com os projetos do usuário — salva imediatamente ao selecionar |
 | Target Folder | Pasta destino dentro do projeto Unity, ex: `Assets/ImportedAssets` |
+
+**Para atualizar a URL de Production:** edite a constante `ProductionApiUrl` em `PipelineSettings.cs` com a URL real da Vercel após o primeiro deploy.
 
 Settings ficam no `EditorPrefs` — por usuário, por máquina. Nunca commitados.
 

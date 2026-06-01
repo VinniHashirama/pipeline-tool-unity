@@ -26,8 +26,9 @@ namespace AntiGravity.PipelineTool.Editor
         private string _password = "";
 
         // Settings (buffered — saved explicitly)
-        private string _apiUrl;
-        private string _importPath;
+        private ServerEnvironment _serverEnv;
+        private string            _customUrl  = "";
+        private string            _importPath;
 
         // Project dropdown
         private ProjectInfo[] _projects       = Array.Empty<ProjectInfo>();
@@ -46,7 +47,8 @@ namespace AntiGravity.PipelineTool.Editor
 
         private void OnEnable()
         {
-            _apiUrl     = PipelineSettings.ApiBaseUrl;
+            _serverEnv  = PipelineSettings.SelectedEnvironment;
+            _customUrl  = PipelineSettings.CustomApiUrl;
             _importPath = PipelineSettings.ImportTargetPath;
 
             if (PipelineSettings.IsLoggedIn && !_projectsLoaded)
@@ -85,6 +87,9 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.LabelField("Sign in to access the import tool.", EditorStyles.miniLabel);
             EditorGUILayout.Space(16);
 
+            DrawServerPicker();
+            EditorGUILayout.Space(12);
+
             _email    = EditorGUILayout.TextField("Email", _email);
             _password = EditorGUILayout.PasswordField("Password", _password);
 
@@ -100,6 +105,39 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.EndVertical();
             GUILayout.Space(24);
             EditorGUILayout.EndHorizontal();
+        }
+
+        // ------------------------------------------------------------------ //
+        // Server picker (login screen + settings tab)
+
+        private static readonly string[] ServerLabels = { "Local  (localhost:3000)", "Production", "Custom" };
+
+        private void DrawServerPicker()
+        {
+            EditorGUI.BeginChangeCheck();
+            var newEnv = (ServerEnvironment)EditorGUILayout.Popup("Server", (int)_serverEnv, ServerLabels);
+            if (EditorGUI.EndChangeCheck())
+            {
+                _serverEnv = newEnv;
+                PipelineSettings.SelectedEnvironment = newEnv;
+            }
+
+            if (_serverEnv == ServerEnvironment.Custom)
+            {
+                EditorGUI.BeginChangeCheck();
+                _customUrl = EditorGUILayout.TextField("URL", _customUrl);
+                if (EditorGUI.EndChangeCheck())
+                    PipelineSettings.CustomApiUrl = _customUrl;
+            }
+            else
+            {
+                var url = _serverEnv == ServerEnvironment.Production
+                    ? PipelineSettings.ProductionApiUrl
+                    : PipelineSettings.LocalApiUrl;
+                EditorGUI.BeginDisabledGroup(true);
+                EditorGUILayout.TextField("URL", url);
+                EditorGUI.EndDisabledGroup();
+            }
         }
 
         // ------------------------------------------------------------------ //
@@ -203,7 +241,7 @@ namespace AntiGravity.PipelineTool.Editor
 
             // Connection
             EditorGUILayout.LabelField("API Connection", EditorStyles.boldLabel);
-            _apiUrl = EditorGUILayout.TextField("API Base URL", _apiUrl);
+            DrawServerPicker();
 
             EditorGUILayout.Space(8);
 
@@ -243,7 +281,6 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.Space(12);
             if (GUILayout.Button("Save Settings"))
             {
-                PipelineSettings.ApiBaseUrl       = _apiUrl;
                 PipelineSettings.ImportTargetPath = _importPath;
                 SetStatus("Settings saved.", false);
             }
