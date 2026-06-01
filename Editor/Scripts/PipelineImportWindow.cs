@@ -12,39 +12,55 @@ namespace AntiGravity.PipelineTool.Editor
     {
         private enum Tab { Assets, Settings }
 
-        private Tab _tab = Tab.Assets;
-        private List<ApprovedAsset> _assets = new();
-        private bool _busy;
+        private Tab    _tab = Tab.Assets;
+        private bool   _busy;
         private string _status = "";
-        private bool _statusError;
-        private Vector2 _scroll;
+        private bool   _statusError;
 
-        // Settings fields (buffered until Save is clicked)
+        // Assets tab
+        private List<ApprovedAsset> _assets = new();
+        private Vector2             _scroll;
+
+        // Login form
+        private string _email    = "";
+        private string _password = "";
+
+        // Settings (buffered — saved explicitly)
         private string _apiUrl;
-        private string _anonKey;
-        private string _pipelineKey;
-        private string _projectId;
         private string _importPath;
+
+        // Project dropdown
+        private ProjectInfo[] _projects       = Array.Empty<ProjectInfo>();
+        private int           _projectIndex;
+        private bool          _projectsLoaded;
+
+        // ------------------------------------------------------------------ //
 
         [MenuItem("Pipeline Tool/Import Window")]
         public static void Open()
         {
             var w = GetWindow<PipelineImportWindow>("Pipeline Tool");
-            w.minSize = new Vector2(480, 380);
+            w.minSize = new Vector2(480, 400);
             w.Show();
         }
 
         private void OnEnable()
         {
-            _apiUrl      = PipelineSettings.ApiBaseUrl;
-            _anonKey     = PipelineSettings.SupabaseAnonKey;
-            _pipelineKey = PipelineSettings.PipelineApiKey;
-            _projectId   = PipelineSettings.ProjectId;
-            _importPath  = PipelineSettings.ImportTargetPath;
+            _apiUrl     = PipelineSettings.ApiBaseUrl;
+            _importPath = PipelineSettings.ImportTargetPath;
+
+            if (PipelineSettings.IsLoggedIn && !_projectsLoaded)
+                _ = LoadProjectsAsync();
         }
 
         private void OnGUI()
         {
+            if (!PipelineSettings.IsLoggedIn)
+            {
+                DrawLoginScreen();
+                return;
+            }
+
             DrawTabBar();
             EditorGUILayout.Space(4);
 
@@ -52,6 +68,38 @@ namespace AntiGravity.PipelineTool.Editor
                 DrawAssetsTab();
             else
                 DrawSettingsTab();
+        }
+
+        // ------------------------------------------------------------------ //
+        // Login screen
+
+        private void DrawLoginScreen()
+        {
+            GUILayout.Space(40);
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(24);
+            EditorGUILayout.BeginVertical();
+
+            EditorGUILayout.LabelField("Pipeline Tool", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Sign in to access the import tool.", EditorStyles.miniLabel);
+            EditorGUILayout.Space(16);
+
+            _email    = EditorGUILayout.TextField("Email", _email);
+            _password = EditorGUILayout.PasswordField("Password", _password);
+
+            EditorGUILayout.Space(8);
+            DrawStatusBar();
+            EditorGUILayout.Space(4);
+
+            GUI.enabled = !_busy;
+            if (GUILayout.Button(_busy ? "Signing in…" : "Sign In"))
+                _ = LoginAsync();
+            GUI.enabled = true;
+
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(24);
+            EditorGUILayout.EndHorizontal();
         }
 
         // ------------------------------------------------------------------ //
@@ -82,14 +130,14 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.EndHorizontal();
 
             DrawStatusBar();
-
             EditorGUILayout.Space(4);
 
             if (_assets.Count == 0 && !_busy)
             {
-                EditorGUILayout.HelpBox(
-                    "No approved assets. Configure the connection in Settings, then click Refresh.",
-                    MessageType.Info);
+                var msg = string.IsNullOrEmpty(PipelineSettings.ProjectId)
+                    ? "Select a project in Settings, then click Refresh."
+                    : "No approved assets for this project.";
+                EditorGUILayout.HelpBox(msg, MessageType.Info);
                 return;
             }
 
@@ -139,23 +187,63 @@ namespace AntiGravity.PipelineTool.Editor
 
         private void DrawSettingsTab()
         {
+            // Account
+            EditorGUILayout.LabelField("Account", EditorStyles.boldLabel);
+            var displayName = !string.IsNullOrEmpty(PipelineSettings.UserFullName)
+                ? PipelineSettings.UserFullName
+                : PipelineSettings.UserEmail;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Signed in as:  {displayName}", EditorStyles.miniLabel);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Sign Out", GUILayout.Width(75)))
+                SignOut();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(12);
+
+            // Connection
             EditorGUILayout.LabelField("API Connection", EditorStyles.boldLabel);
-            _apiUrl      = EditorGUILayout.TextField("API Base URL", _apiUrl);
-            _anonKey     = EditorGUILayout.PasswordField("Supabase Anon Key", _anonKey);
-            _pipelineKey = EditorGUILayout.PasswordField("Pipeline API Key (X-Pipeline-Key)", _pipelineKey);
-            _projectId   = EditorGUILayout.TextField("Project ID (optional)", _projectId);
+            _apiUrl = EditorGUILayout.TextField("API Base URL", _apiUrl);
 
             EditorGUILayout.Space(8);
+
+            // Project
+            EditorGUILayout.LabelField("Project", EditorStyles.boldLabel);
+            if (_projects.Length == 0)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(
+                    _projectsLoaded ? "No projects found for this account." : "Loading projects…",
+                    EditorStyles.miniLabel);
+                if (_projectsLoaded && GUILayout.Button("Reload", GUILayout.Width(60)))
+                    _ = LoadProjectsAsync();
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                var names = new string[_projects.Length];
+                for (var i = 0; i < _projects.Length; i++)
+                    names[i] = _projects[i].name;
+
+                var newIndex = EditorGUILayout.Popup("Project", _projectIndex, names);
+                if (newIndex != _projectIndex)
+                {
+                    _projectIndex = newIndex;
+                    PipelineSettings.ProjectId   = _projects[newIndex].id;
+                    PipelineSettings.ProjectName = _projects[newIndex].name;
+                }
+            }
+
+            EditorGUILayout.Space(8);
+
+            // Import path
             EditorGUILayout.LabelField("Import", EditorStyles.boldLabel);
             _importPath = EditorGUILayout.TextField("Target Folder", _importPath);
 
             EditorGUILayout.Space(12);
             if (GUILayout.Button("Save Settings"))
             {
-                PipelineSettings.ApiBaseUrl      = _apiUrl;
-                PipelineSettings.SupabaseAnonKey = _anonKey;
-                PipelineSettings.PipelineApiKey  = _pipelineKey;
-                PipelineSettings.ProjectId       = _projectId;
+                PipelineSettings.ApiBaseUrl       = _apiUrl;
                 PipelineSettings.ImportTargetPath = _importPath;
                 SetStatus("Settings saved.", false);
             }
@@ -163,6 +251,73 @@ namespace AntiGravity.PipelineTool.Editor
 
         // ------------------------------------------------------------------ //
         // Async operations
+
+        private async Task LoginAsync()
+        {
+            _busy = true;
+            SetStatus("Signing in…", false);
+            Repaint();
+
+            try
+            {
+                await PipelineApiClient.LoginAsync(_email, _password);
+                _password = ""; // clear from memory immediately
+                SetStatus("", false);
+                await LoadProjectsAsync();
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Sign in failed: {ex.Message}", true);
+            }
+            finally
+            {
+                _busy = false;
+                Repaint();
+            }
+        }
+
+        private async Task LoadProjectsAsync()
+        {
+            try
+            {
+                _projects       = await PipelineApiClient.GetUserProjectsAsync();
+                _projectsLoaded = true;
+
+                // Restore previously selected project index
+                var savedId = PipelineSettings.ProjectId;
+                _projectIndex = 0;
+                for (var i = 0; i < _projects.Length; i++)
+                {
+                    if (_projects[i].id == savedId) { _projectIndex = i; break; }
+                }
+
+                // If only one project, auto-select it
+                if (_projects.Length == 1 && string.IsNullOrEmpty(PipelineSettings.ProjectId))
+                {
+                    PipelineSettings.ProjectId   = _projects[0].id;
+                    PipelineSettings.ProjectName = _projects[0].name;
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Failed to load projects: {ex.Message}", true);
+            }
+            finally
+            {
+                Repaint();
+            }
+        }
+
+        private void SignOut()
+        {
+            PipelineSettings.ClearSession();
+            _assets         = new List<ApprovedAsset>();
+            _projects       = Array.Empty<ProjectInfo>();
+            _projectsLoaded = false;
+            _projectIndex   = 0;
+            SetStatus("", false);
+            Repaint();
+        }
 
         private async Task RefreshAsync()
         {
@@ -181,7 +336,15 @@ namespace AntiGravity.PipelineTool.Editor
             }
             catch (Exception ex)
             {
-                SetStatus($"Refresh failed: {ex.Message}", true);
+                if (ex.Message.Contains("401"))
+                {
+                    SignOut();
+                    SetStatus("Session expired. Please sign in again.", true);
+                }
+                else
+                {
+                    SetStatus($"Refresh failed: {ex.Message}", true);
+                }
             }
             finally
             {
@@ -200,6 +363,7 @@ namespace AntiGravity.PipelineTool.Editor
             try
             {
                 var localPath = await AssetDownloader.DownloadAsync(
+                    asset.id,
                     ver,
                     progress =>
                     {
@@ -241,7 +405,7 @@ namespace AntiGravity.PipelineTool.Editor
 
         private static string FormatBytes(long bytes)
         {
-            if (bytes <= 0) return "—";
+            if (bytes <= 0)          return "—";
             if (bytes < 1024)        return $"{bytes} B";
             if (bytes < 1024 * 1024) return $"{bytes / 1024f:F1} KB";
             return $"{bytes / (1024f * 1024f):F1} MB";

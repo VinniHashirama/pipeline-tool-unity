@@ -9,8 +9,42 @@ namespace AntiGravity.PipelineTool.Editor
 {
     internal static class PipelineApiClient
     {
+        // ------------------------------------------------------------------ //
+        // Auth
+
+        public static async Task LoginAsync(string email, string password)
+        {
+            var url     = $"{PipelineSettings.ApiBaseUrl}/api/auth/login";
+            var payload = JsonUtility.ToJson(new LoginRequest { email = email, password = password });
+            var json    = await PostAsync(url, payload, requiresAuth: false);
+            var resp    = JsonUtility.FromJson<AuthResponse>(json);
+            StoreSession(resp);
+        }
+
+        public static async Task RefreshAsync()
+        {
+            var url     = $"{PipelineSettings.ApiBaseUrl}/api/auth/refresh";
+            var payload = JsonUtility.ToJson(new RefreshRequest { refresh_token = PipelineSettings.RefreshToken });
+            var json    = await PostAsync(url, payload, requiresAuth: false);
+            var resp    = JsonUtility.FromJson<AuthResponse>(json);
+            StoreSession(resp);
+        }
+
+        public static async Task<ProjectInfo[]> GetUserProjectsAsync()
+        {
+            await EnsureValidTokenAsync();
+            var url  = $"{PipelineSettings.ApiBaseUrl}/api/user/projects";
+            var json = await GetAsync(url);
+            var resp = JsonUtility.FromJson<ProjectsResponse>(json);
+            return resp.projects ?? Array.Empty<ProjectInfo>();
+        }
+
+        // ------------------------------------------------------------------ //
+        // Assets
+
         public static async Task<ApprovedAssetsResponse> GetApprovedAssetsAsync(string projectId = null)
         {
+            await EnsureValidTokenAsync();
             var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/approved";
             if (!string.IsNullOrEmpty(projectId))
                 url += $"?project_id={Uri.EscapeDataString(projectId)}";
@@ -21,7 +55,8 @@ namespace AntiGravity.PipelineTool.Editor
 
         public static async Task<ImportResult> MarkImportedAsync(string taskId, string versionId, string commitHash = null)
         {
-            var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/{Uri.EscapeDataString(taskId)}/mark-imported";
+            await EnsureValidTokenAsync();
+            var url     = $"{PipelineSettings.ApiBaseUrl}/api/assets/{Uri.EscapeDataString(taskId)}/mark-imported";
             var payload = JsonUtility.ToJson(new MarkImportedPayload
             {
                 version_id  = versionId ?? "",
@@ -32,34 +67,77 @@ namespace AntiGravity.PipelineTool.Editor
         }
 
         // ------------------------------------------------------------------ //
+        // Internals
 
-        private static Task<string> GetAsync(string url)
+        private static async Task EnsureValidTokenAsync()
         {
-            var req = UnityWebRequest.Get(url);
-            ApplyHeaders(req);
-            return SendAsync(req);
+            if (NowUtcSeconds() >= PipelineSettings.TokenExpiryUtc)
+                await RefreshAsync();
         }
 
-        private static Task<string> PatchAsync(string url, string jsonBody)
+        private static void StoreSession(AuthResponse resp)
         {
-            var bytes = Encoding.UTF8.GetBytes(jsonBody);
-            var req   = new UnityWebRequest(url, "PATCH")
+            PipelineSettings.AccessToken    = resp.access_token  ?? "";
+            PipelineSettings.RefreshToken   = resp.refresh_token ?? "";
+            // Refresh 60s before actual expiry to avoid edge-case 401s
+            PipelineSettings.TokenExpiryUtc = NowUtcSeconds() + resp.expires_in - 60;
+
+            if (resp.user != null)
             {
-                uploadHandler   = new UploadHandlerRaw(bytes),
-                downloadHandler = new DownloadHandlerBuffer(),
-            };
-            req.SetRequestHeader("Content-Type", "application/json");
-            ApplyHeaders(req);
-            return SendAsync(req);
+                PipelineSettings.UserId       = resp.user.id        ?? "";
+                PipelineSettings.UserEmail    = resp.user.email      ?? "";
+                PipelineSettings.UserFullName = resp.user.full_name  ?? "";
+            }
         }
 
-        private static void ApplyHeaders(UnityWebRequest req)
-        {
-            var anonKey = PipelineSettings.SupabaseAnonKey;
-            if (!string.IsNullOrEmpty(anonKey))
-                req.SetRequestHeader("Authorization", $"Bearer {anonKey}");
+        private static long NowUtcSeconds() =>
+            (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
 
-            // Optional dedicated API key (see PipelineSettings.PipelineApiKey).
+        // ------------------------------------------------------------------ //
+        // HTTP helpers
+
+        private static Task<string> GetAsync(string url) =>
+            SendAsync(BuildRequest(url, "GET", null));
+
+        private static Task<string> PostAsync(string url, string jsonBody, bool requiresAuth = true) =>
+            SendAsync(BuildRequest(url, "POST", jsonBody, requiresAuth));
+
+        private static Task<string> PatchAsync(string url, string jsonBody) =>
+            SendAsync(BuildRequest(url, "PATCH", jsonBody));
+
+        private static UnityWebRequest BuildRequest(string url, string method, string jsonBody, bool requiresAuth = true)
+        {
+            UnityWebRequest req;
+
+            if (jsonBody != null)
+            {
+                var bytes = Encoding.UTF8.GetBytes(jsonBody);
+                req = new UnityWebRequest(url, method)
+                {
+                    uploadHandler   = new UploadHandlerRaw(bytes),
+                    downloadHandler = new DownloadHandlerBuffer(),
+                };
+                req.SetRequestHeader("Content-Type", "application/json");
+            }
+            else
+            {
+                req = UnityWebRequest.Get(url);
+            }
+
+            if (requiresAuth)
+                ApplyAuthHeaders(req);
+
+            return req;
+        }
+
+        private static void ApplyAuthHeaders(UnityWebRequest req)
+        {
+            var token = PipelineSettings.AccessToken;
+            if (!string.IsNullOrEmpty(token))
+                req.SetRequestHeader("Authorization", $"Bearer {token}");
+
+            // Legacy dual-auth fallback: if a Pipeline API Key is configured,
+            // send it alongside — the server accepts either auth method.
             var apiKey = PipelineSettings.PipelineApiKey;
             if (!string.IsNullOrEmpty(apiKey))
                 req.SetRequestHeader("X-Pipeline-Key", apiKey);

@@ -20,11 +20,12 @@ Editor/
 └── Scripts/
     ├── Models/
     │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response
-    │   └── ImportResult.cs         — mirrors PATCH /mark-imported response
-    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, keys, paths)
-    ├── PipelineApiClient.cs        — async HTTP via UnityWebRequest + TaskCompletionSource
-    ├── AssetDownloader.cs          — file download + AssetDatabase.ImportAsset
-    └── PipelineImportWindow.cs     — EditorWindow: Assets tab + Settings tab
+    │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
+    │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse
+    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path)
+    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetApprovedAssets, MarkImported
+    ├── AssetDownloader.cs          — download via proxy endpoint + AssetDatabase.ImportAsset
+    └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab + Settings tab
 ```
 
 Everything is Editor-only — no Runtime assembly. The package has no dependency on other UPM packages.
@@ -108,25 +109,56 @@ Ao abrir um projeto Unity que referencia este package via `file:`, o Rider cria 
 
 ## Configuração
 
-Abra **Pipeline Tool > Import Window** → aba **Settings**:
+Abra **Pipeline Tool > Import Window**. Na primeira abertura, o tool exibe uma tela de login.
+
+### Tela de Login
 
 | Campo | Descrição |
 |---|---|
+| Email | Email da conta no Pipeline Tool (mesma usada na web app) |
+| Password | Senha da conta |
+
+Após login, o tool busca automaticamente os projetos do usuário e exibe um dropdown na aba Settings.
+
+### Aba Settings (após login)
+
+| Campo | Descrição |
+|---|---|
+| Signed in as | Nome do usuário logado + botão **Sign Out** |
 | API Base URL | `http://localhost:3000` (dev) ou URL Vercel (prod) |
-| Supabase Anon Key | Supabase Dashboard → Project Settings → API → `anon public` |
-| Pipeline API Key | Valor de `UNITY_TOOL_API_KEY` configurado no servidor web |
-| Project ID | UUID do projeto no Pipeline Tool (opcional — filtra assets por projeto) |
+| Project | Dropdown com os projetos do usuário — salva imediatamente ao selecionar |
 | Target Folder | Pasta destino dentro do projeto Unity, ex: `Assets/ImportedAssets` |
 
 Settings ficam no `EditorPrefs` — por usuário, por máquina. Nunca commitados.
 
 ## Autenticação
 
-O tool envia o `Pipeline API Key` como header `X-Pipeline-Key` em todas as requisições. O servidor valida contra a env var `UNITY_TOOL_API_KEY`.
+O tool usa **Supabase JWT** (email + password) — as mesmas credenciais da web app.
 
-**Importante:** o `Supabase Anon Key` visível nas Settings **não é** usado como auth token — ele é apenas o identificador público do projeto Supabase (e pode ser necessário para futuras chamadas diretas ao Supabase). A autenticação real com o servidor web é feita **exclusivamente** pelo `Pipeline API Key`.
+**Fluxo:**
+1. Usuário informa email + senha na tela de login
+2. Unity chama `POST /api/auth/login` no servidor web (proxy para Supabase Auth)
+3. Servidor retorna `access_token` (JWT, expira em 1h) + `refresh_token`
+4. Tokens armazenados no `EditorPrefs` (plain text — limitação conhecida do Editor)
+5. Antes de cada chamada à API, o client verifica a expiração e chama `POST /api/auth/refresh` automaticamente
+6. Em caso de 401 (sessão totalmente expirada), o tool limpa a sessão e volta à tela de login
 
-Quando autenticado via API key, o servidor usa `createAdminClient()` (service role) para contornar o RLS do Supabase. O `activity_log` registra a importação com `user_id = null` e `imported_by = "Unity Import Tool"`.
+Todos os requests incluem `Authorization: Bearer <access_token>`. O servidor usa `createBearerClient(token)` para autenticar sem cookie.
+
+**Legacy:** o campo `Pipeline API Key` (X-Pipeline-Key) ainda existe no `PipelineSettings` para uso em automações/CI, mas não aparece na UI da janela.
+
+## Download de Assets
+
+O tool **nunca acessa diretamente** o Supabase Storage ou o Google Drive. O download é feito via:
+
+```
+GET /api/assets/{id}/download?version_id={vid}
+Authorization: Bearer <access_token>
+```
+
+O servidor busca o arquivo no storage correto (Supabase ou GDrive) e entrega como stream. Isso resolve dois problemas:
+- **Supabase Storage:** bucket privado — URLs públicas não funcionam sem auth
+- **Google Drive:** `file_url` no banco é um path relativo (`/api/gdrive/file/{id}`), sem hostname
 
 ## Releases
 
