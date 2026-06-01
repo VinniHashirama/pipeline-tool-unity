@@ -13,7 +13,7 @@ namespace AntiGravity.PipelineTool.Editor
 
         // Update ProductionApiUrl after deploying to Vercel
         internal const string LocalApiUrl      = "http://localhost:3000";
-        internal const string ProductionApiUrl = "https://pipeline-tool.vercel.app";
+        internal const string ProductionApiUrl = "https://pipeline-tool-web.vercel.app";
 
         // Selected project (set after login via dropdown)
         private const string KeyProjectId    = "PipelineTool.ProjectId";
