@@ -18,6 +18,7 @@ namespace AntiGravity.PipelineTool.Editor.Models
         public string status;
         public string project_id;
         public AssetProject project;
+        public AssetCategory category;
         public AssetVersionInfo latest_version;
         public string updated_at;
     }
@@ -28,6 +29,14 @@ namespace AntiGravity.PipelineTool.Editor.Models
         public string id;
         public string name;
         public string storage_type;
+    }
+
+    [Serializable]
+    public class AssetCategory
+    {
+        public string id;
+        public string name;
+        public string asset_type;
     }
 
     [Serializable]

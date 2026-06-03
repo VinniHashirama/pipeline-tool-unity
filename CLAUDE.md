@@ -19,12 +19,12 @@ Editor/
 ├── PipelineTool.Editor.asmdef      — Editor-only assembly (includePlatforms: Editor)
 └── Scripts/
     ├── Models/
-    │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response
+    │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response (inclui AssetCategory)
     │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
     │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse
     ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path)
     ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetApprovedAssets, MarkImported
-    ├── AssetDownloader.cs          — download via proxy endpoint + AssetDatabase.ImportAsset
+    ├── AssetDownloader.cs          — download via proxy + hierarquia de pastas local (TypePlural/Category?/AssetTitle/)
     └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab + Settings tab
 ```
 
@@ -163,6 +163,30 @@ Authorization: Bearer <access_token>
 O servidor busca o arquivo no storage correto (Supabase ou GDrive) e entrega como stream. Isso resolve dois problemas:
 - **Supabase Storage:** bucket privado — URLs públicas não funcionam sem auth
 - **Google Drive:** `file_url` no banco é um path relativo (`/api/gdrive/file/{id}`), sem hostname
+
+## Hierarquia de pastas local
+
+O `AssetDownloader` cria automaticamente a hierarquia de pastas no projeto Unity espelhando a estrutura do Pipeline Tool:
+
+```
+[Target Folder]/
+  Props/
+    Industrial/          ← categoria (se definida)
+      PROP_Conteiner/    ← título da task
+        PROP_Conteiner_v3.fbx
+  Characters/
+    CH_Guerreiro/
+      CH_Guerreiro_v1.fbx
+```
+
+**Mapeamento de tipos:**
+`prop → Props` · `character → Characters` · `environment → Environments` · `vfx → VFX` · `ui → UI` · `audio → Audio` · `other → Other`
+
+Assets sem categoria vão direto sob o tipo: `Props/PROP_Cadeira/file.fbx`.
+
+O **Target Folder** é configurável na aba Settings (default: `Assets/ImportedAssets`). O nome do projeto **não** faz parte do path local — a organização por projeto fica por conta do Target Folder escolhido pelo tech artist.
+
+Os modelos `ApprovedAsset` e `AssetCategory` em `Models/ApprovedAsset.cs` espelham o response do servidor (campo `category` é nullable).
 
 ## Releases
 

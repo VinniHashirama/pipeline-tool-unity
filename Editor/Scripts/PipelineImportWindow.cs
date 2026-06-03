@@ -400,8 +400,7 @@ namespace AntiGravity.PipelineTool.Editor
             try
             {
                 var localPath = await AssetDownloader.DownloadAsync(
-                    asset.id,
-                    ver,
+                    asset,
                     progress =>
                     {
                         _status = $"Downloading {ver.file_name}… {progress:P0}";

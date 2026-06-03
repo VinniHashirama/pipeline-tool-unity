@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -10,30 +11,38 @@ namespace AntiGravity.PipelineTool.Editor
 {
     internal static class AssetDownloader
     {
+        private static readonly Dictionary<string, string> TypeFolderNames = new Dictionary<string, string>
+        {
+            { "prop",         "Props"        },
+            { "character",    "Characters"   },
+            { "environment",  "Environments" },
+            { "vfx",          "VFX"          },
+            { "ui",           "UI"           },
+            { "audio",        "Audio"        },
+            { "other",        "Other"        },
+        };
+
         /// <summary>
-        /// Downloads an asset via the Next.js server proxy (authenticated).
-        /// The server fetches the file from Supabase Storage internally,
-        /// so the Unity tool never needs direct access to the private bucket.
+        /// Downloads an asset via the Next.js server proxy and saves it under the
+        /// hierarchy: [ImportTargetPath]/[TypePlural]/[Category?]/[AssetTitle]/filename
         /// Returns the local path relative to the project root.
         /// </summary>
         public static async Task<string> DownloadAsync(
-            string taskId,
-            AssetVersionInfo version,
+            ApprovedAsset asset,
             Action<float> onProgress = null)
         {
-            var targetDir = PipelineSettings.ImportTargetPath;
-            if (!Directory.Exists(targetDir))
-                Directory.CreateDirectory(targetDir);
+            var version = asset.latest_version;
+            var destPath = BuildDestPath(asset);
+            var destDir = Path.GetDirectoryName(destPath);
 
-            var destPath = Path.Combine(targetDir, version.file_name).Replace("\\", "/");
+            if (!Directory.Exists(destDir))
+                Directory.CreateDirectory(destDir);
 
-            // Route through the server proxy — avoids direct Supabase Storage auth complexity.
-            var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/{Uri.EscapeDataString(taskId)}/download" +
+            var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/{Uri.EscapeDataString(asset.id)}/download" +
                       $"?version_id={Uri.EscapeDataString(version.id)}";
 
             using var req = UnityWebRequest.Get(url);
 
-            // Authenticate with the same JWT used for all other API calls.
             var token = PipelineSettings.AccessToken;
             if (!string.IsNullOrEmpty(token))
                 req.SetRequestHeader("Authorization", $"Bearer {token}");
@@ -55,6 +64,30 @@ namespace AntiGravity.PipelineTool.Editor
             AssetDatabase.ImportAsset(destPath, ImportAssetOptions.ForceUpdate);
 
             return destPath;
+        }
+
+        // [ImportTargetPath]/[TypePlural]/[Category?]/[AssetTitle]/filename
+        private static string BuildDestPath(ApprovedAsset asset)
+        {
+            var version = asset.latest_version;
+            var dir = PipelineSettings.ImportTargetPath;
+
+            var typeName = TypeFolderNames.TryGetValue(asset.asset_type ?? "", out var t) ? t : "Other";
+            dir = Path.Combine(dir, typeName);
+
+            if (asset.category != null && !string.IsNullOrWhiteSpace(asset.category.name))
+                dir = Path.Combine(dir, SanitizeSegment(asset.category.name));
+
+            dir = Path.Combine(dir, SanitizeSegment(asset.title));
+
+            return Path.Combine(dir, version.file_name).Replace("\\", "/");
+        }
+
+        private static string SanitizeSegment(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name.Trim();
         }
     }
 }
