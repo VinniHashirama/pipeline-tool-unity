@@ -53,6 +53,10 @@ namespace AntiGravity.PipelineTool.Editor
 
             if (PipelineSettings.IsLoggedIn && !_projectsLoaded)
                 _ = LoadProjectsAsync();
+
+            if (PipelineSettings.IsLoggedIn && PipelineSettings.AutoRefreshSyncOnStartup &&
+                !string.IsNullOrEmpty(PipelineSettings.ProjectId))
+                _ = PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
         }
 
         private void OnGUI()
@@ -162,6 +166,8 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.LabelField("Approved Assets", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             GUI.enabled = !_busy;
+            if (GUILayout.Button("Sync Status", GUILayout.Width(85)))
+                _ = SyncStatusAsync();
             if (GUILayout.Button(_busy ? "Loading…" : "Refresh", GUILayout.Width(70)))
                 _ = RefreshAsync();
             GUI.enabled = true;
@@ -278,6 +284,16 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.LabelField("Import", EditorStyles.boldLabel);
             _importPath = EditorGUILayout.TextField("Target Folder", _importPath);
 
+            EditorGUILayout.Space(8);
+
+            // Sync status
+            EditorGUILayout.LabelField("Sync Status", EditorStyles.boldLabel);
+            EditorGUI.BeginChangeCheck();
+            var autoRefreshSync = EditorGUILayout.Toggle(
+                "Auto-refresh on Editor start", PipelineSettings.AutoRefreshSyncOnStartup);
+            if (EditorGUI.EndChangeCheck())
+                PipelineSettings.AutoRefreshSyncOnStartup = autoRefreshSync;
+
             EditorGUILayout.Space(12);
             if (GUILayout.Button("Save Settings"))
             {
@@ -386,6 +402,26 @@ namespace AntiGravity.PipelineTool.Editor
             finally
             {
                 _busy = false;
+                Repaint();
+            }
+        }
+
+        private async Task SyncStatusAsync()
+        {
+            SetStatus("Checking sync status…", false);
+            Repaint();
+
+            try
+            {
+                await PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
+                SetStatus("Sync status updated.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Sync status check failed: {ex.Message}", true);
+            }
+            finally
+            {
                 Repaint();
             }
         }

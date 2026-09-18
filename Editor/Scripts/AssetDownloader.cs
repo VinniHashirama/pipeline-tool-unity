@@ -63,6 +63,17 @@ namespace AntiGravity.PipelineTool.Editor
 
             AssetDatabase.ImportAsset(destPath, ImportAssetOptions.ForceUpdate);
 
+            var guid = AssetDatabase.AssetPathToGUID(destPath);
+            PipelineManifest.Set(guid, new ManifestEntry
+            {
+                guid = guid,
+                asset_id = asset.id,
+                version_id = version.id,
+                version_number = version.version_number,
+                task_title = asset.title,
+                local_hash = PipelineManifest.Sha1Hex(data),
+            });
+
             return destPath;
         }
 

@@ -53,6 +53,21 @@ namespace AntiGravity.PipelineTool.Editor
             return JsonUtility.FromJson<ApprovedAssetsResponse>(json);
         }
 
+        /// <summary>
+        /// Lists approved + imported assets for a project — used to build the sync-status
+        /// cache (latest server version per asset), not the "assets to import" list.
+        /// </summary>
+        public static async Task<ApprovedAssetsResponse> GetProjectAssetsForSyncAsync(string projectId)
+        {
+            await EnsureValidTokenAsync();
+            var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/approved?include_imported=true";
+            if (!string.IsNullOrEmpty(projectId))
+                url += $"&project_id={Uri.EscapeDataString(projectId)}";
+
+            var json = await GetAsync(url);
+            return JsonUtility.FromJson<ApprovedAssetsResponse>(json);
+        }
+
         public static async Task<ImportResult> MarkImportedAsync(string taskId, string versionId, string commitHash = null)
         {
             await EnsureValidTokenAsync();

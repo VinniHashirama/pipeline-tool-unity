@@ -10,6 +10,7 @@ namespace AntiGravity.PipelineTool.Editor
         private const string KeyServerEnv    = "PipelineTool.ServerEnvironment";
         private const string KeyCustomApiUrl = "PipelineTool.CustomApiUrl";
         private const string KeyImportPath   = "PipelineTool.ImportTargetPath";
+        private const string KeyAutoRefreshSync = "PipelineTool.AutoRefreshSyncOnStartup";
 
         // Update ProductionApiUrl after deploying to Vercel
         internal const string LocalApiUrl      = "http://localhost:3000";
@@ -63,6 +64,12 @@ namespace AntiGravity.PipelineTool.Editor
         {
             get => EditorPrefs.GetString(KeyImportPath, "Assets/ImportedAssets");
             set => EditorPrefs.SetString(KeyImportPath, value);
+        }
+
+        public static bool AutoRefreshSyncOnStartup
+        {
+            get => EditorPrefs.GetBool(KeyAutoRefreshSync, true);
+            set => EditorPrefs.SetBool(KeyAutoRefreshSync, value);
         }
 
         // ------------------------------------------------------------------ //

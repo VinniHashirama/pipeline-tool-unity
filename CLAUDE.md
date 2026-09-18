@@ -22,10 +22,12 @@ Editor/
     │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response (inclui AssetCategory)
     │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
     │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse
-    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path)
-    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetApprovedAssets, MarkImported
-    ├── AssetDownloader.cs          — download via proxy + hierarquia de pastas local (TypePlural/Category?/AssetTitle/)
-    └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab + Settings tab
+    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag)
+    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetApprovedAssets, GetProjectAssetsForSync, MarkImported
+    ├── AssetDownloader.cs          — download via proxy + hierarquia de pastas local (TypePlural/Category?/AssetTitle/) + registra entrada no manifesto
+    ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash
+    ├── PipelineSyncStatus.cs       — overlay de ícone de sync na aba Project (projectWindowItemOnGUI) + refresh contra o servidor
+    └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab (Refresh / Sync Status) + Settings tab
 ```
 
 Everything is Editor-only — no Runtime assembly. The package has no dependency on other UPM packages.
@@ -187,6 +189,39 @@ Assets sem categoria vão direto sob o tipo: `Props/PROP_Cadeira/file.fbx`.
 O **Target Folder** é configurável na aba Settings (default: `Assets/ImportedAssets`). O nome do projeto **não** faz parte do path local — a organização por projeto fica por conta do Target Folder escolhido pelo tech artist.
 
 Os modelos `ApprovedAsset` e `AssetCategory` em `Models/ApprovedAsset.cs` espelham o response do servidor (campo `category` é nullable).
+
+## Sync Status Overlay
+
+Depois de importar um asset, o tool grava uma entrada em `.pipeline-manifest.json` (na raiz do **Target Folder**) associando o asset local à sua origem no Pipeline Tool. A aba Project passa a mostrar um ícone sobre cada asset rastreado:
+
+| Ícone | Estado | Significado |
+|---|---|---|
+| `✓` verde | Synced | O arquivo local bate com a versão mais recente aprovada/importada no servidor |
+| `!` laranja | Outdated | Existe uma versão mais nova no servidor do que a baixada localmente |
+| `M` azul | Modified Locally | O conteúdo do arquivo local mudou desde o download (hash diverge) — provável edição manual fora do pipeline |
+
+### Formato do manifesto
+
+`.pipeline-manifest.json` é um arquivo único, **commitado no repositório do jogo** (visibilidade compartilhada entre o time), chaveado pelo **GUID** do asset — não pelo path. O GUID é gerido pelo próprio Unity via `.meta`; o tool só o lê via `AssetDatabase`, nunca escreve nele, então não há risco de mexer nas configurações de import do asset. Isso também significa que renomear/mover um asset rastreado no Unity não quebra a referência.
+
+```json
+{
+  "entries": [
+    { "guid": "a1b2c3...", "asset_id": "uuid", "version_id": "uuid", "version_number": 3, "task_title": "PROP_Conteiner", "local_hash": "sha1..." }
+  ]
+}
+```
+
+Como é um arquivo único compartilhado, existe risco residual de conflito de merge quando duas pessoas importam/atualizam assets diferentes em paralelo — mitigado mantendo as entradas sempre ordenadas por GUID antes de salvar (ajuda o merge automático do git). Na prática é um conflito de JSON simples de resolver manualmente. Se isso virar recorrente, um merge driver customizado é a próxima etapa — não implementado agora.
+
+### Quando o refresh de sync acontece
+
+Nunca dentro do callback de desenho (`projectWindowItemOnGUI`, que roda a cada repaint da aba Project) — isso só lê os dicionários já calculados em memória. A chamada de rede (`PipelineSyncStatus.RefreshAsync`) dispara em dois lugares:
+
+- Automaticamente quando a Import Window é aberta/reabilitada (`OnEnable`), se `PipelineSettings.AutoRefreshSyncOnStartup` estiver ligado (default: `true`).
+- Manualmente pelo botão **Sync Status** na aba Assets.
+
+O toggle **Auto-refresh on Editor start**, na aba Settings, desliga o gatilho automático — útil em projetos grandes onde o custo do refresh (ler hash de cada asset rastreado do disco) pode incomodar.
 
 ## Releases
 
