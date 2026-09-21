@@ -1,3 +1,4 @@
+using System;
 using UnityEditor;
 
 namespace AntiGravity.PipelineTool.Editor
@@ -27,6 +28,12 @@ namespace AntiGravity.PipelineTool.Editor
         private const string KeyUserId       = "PipelineTool.UserId";
         private const string KeyUserEmail    = "PipelineTool.UserEmail";
         private const string KeyUserFullName = "PipelineTool.UserFullName";
+
+        // Permissões efetivas no projeto selecionado, separadas por vírgula.
+        // Cache de conveniência para a UI; o servidor revalida em toda chamada.
+        private const string KeyPermissions  = "PipelineTool.Permissions";
+        private const string KeyIsAdmin      = "PipelineTool.IsAdmin";
+        private const string KeyPermissionsLoaded = "PipelineTool.PermissionsLoaded";
 
         // Legacy — not shown in UI; kept so the server-side dual-auth (X-Pipeline-Key) still works
         // if the key is pre-configured via EditorPrefs directly.
@@ -137,6 +144,37 @@ namespace AntiGravity.PipelineTool.Editor
         }
 
         // ------------------------------------------------------------------ //
+        // Permissões
+
+        public static bool IsAdmin
+        {
+            get => EditorPrefs.GetBool(KeyIsAdmin, false);
+            set => EditorPrefs.SetBool(KeyIsAdmin, value);
+        }
+
+        public static void StorePermissions(string[] allowed, bool isAdmin)
+        {
+            EditorPrefs.SetString(KeyPermissions, allowed == null ? "" : string.Join(",", allowed));
+            EditorPrefs.SetBool(KeyPermissionsLoaded, true);
+            IsAdmin = isAdmin;
+        }
+
+        /// <summary>
+        /// Enquanto as permissões não chegaram do servidor (sessão recém-restaurada,
+        /// rede fora), devolve true — a UI não some por falta de dado, e quem nega
+        /// de fato é o servidor, em toda chamada.
+        ///
+        /// A flag separada distingue "ainda não carregou" de "carregou e o usuário
+        /// não pode nada": sem ela, quem não tem permissão nenhuma veria tudo liberado.
+        /// </summary>
+        public static bool Can(string action)
+        {
+            if (IsAdmin) return true;
+            if (!EditorPrefs.GetBool(KeyPermissionsLoaded, false)) return true;
+            var raw = EditorPrefs.GetString(KeyPermissions, "");
+            if (string.IsNullOrEmpty(raw)) return false;
+            return Array.IndexOf(raw.Split(','), action) >= 0;
+        }
 
         public static void ClearSession()
         {
@@ -148,6 +186,9 @@ namespace AntiGravity.PipelineTool.Editor
             EditorPrefs.DeleteKey(KeyUserFullName);
             EditorPrefs.DeleteKey(KeyProjectId);
             EditorPrefs.DeleteKey(KeyProjectName);
+            EditorPrefs.DeleteKey(KeyPermissions);
+            EditorPrefs.DeleteKey(KeyPermissionsLoaded);
+            EditorPrefs.DeleteKey(KeyIsAdmin);
         }
     }
 }

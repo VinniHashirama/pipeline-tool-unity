@@ -54,6 +54,11 @@ namespace AntiGravity.PipelineTool.Editor
             if (PipelineSettings.IsLoggedIn && !_projectsLoaded)
                 _ = LoadProjectsAsync();
 
+            // Sessão restaurada: reidrata as permissões, senão a UI ficaria com
+            // o cache da última vez (ou liberada, se nunca tiver carregado).
+            if (PipelineSettings.IsLoggedIn)
+                _ = LoadPermissionsAsync();
+
             if (PipelineSettings.IsLoggedIn && PipelineSettings.AutoRefreshSyncOnStartup &&
                 !string.IsNullOrEmpty(PipelineSettings.ProjectId))
                 _ = PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
@@ -217,8 +222,11 @@ namespace AntiGravity.PipelineTool.Editor
 
             GUILayout.FlexibleSpace();
 
-            GUI.enabled = !_busy && ver != null;
-            if (GUILayout.Button("Import", GUILayout.Width(65)))
+            var canImport = PipelineSettings.Can("unity.import");
+            GUI.enabled = !_busy && ver != null && canImport;
+            if (GUILayout.Button(new GUIContent("Import",
+                    canImport ? null : "Sua função não tem permissão para importar neste projeto"),
+                    GUILayout.Width(65)))
                 _ = ImportAsync(asset);
             GUI.enabled = true;
 
@@ -275,6 +283,8 @@ namespace AntiGravity.PipelineTool.Editor
                     _projectIndex = newIndex;
                     PipelineSettings.ProjectId   = _projects[newIndex].id;
                     PipelineSettings.ProjectName = _projects[newIndex].name;
+                    // As permissões são por projeto — trocar de projeto pode mudar a função.
+                    _ = LoadPermissionsAsync();
                 }
             }
 
@@ -317,6 +327,7 @@ namespace AntiGravity.PipelineTool.Editor
                 _password = ""; // clear from memory immediately
                 SetStatus("", false);
                 await LoadProjectsAsync();
+                await LoadPermissionsAsync();
             }
             catch (Exception ex)
             {
@@ -325,6 +336,25 @@ namespace AntiGravity.PipelineTool.Editor
             finally
             {
                 _busy = false;
+                Repaint();
+            }
+        }
+
+        private async Task LoadPermissionsAsync()
+        {
+            try
+            {
+                var perms = await PipelineApiClient.GetPermissionsAsync(PipelineSettings.ProjectId);
+                PipelineSettings.StorePermissions(perms?.allowed, perms?.is_admin ?? false);
+            }
+            catch (Exception ex)
+            {
+                // Falha aqui não deve travar a janela: o botão segue habilitado e
+                // o servidor recusa se for o caso.
+                Debug.LogWarning($"[Pipeline Tool] Não foi possível carregar permissões: {ex.Message}");
+            }
+            finally
+            {
                 Repaint();
             }
         }
@@ -428,6 +458,14 @@ namespace AntiGravity.PipelineTool.Editor
 
         private async Task ImportAsync(ApprovedAsset asset)
         {
+            // Defesa em profundidade: o botão já fica desabilitado, mas o método
+            // também é alcançável por outro caminho de código.
+            if (!PipelineSettings.Can("unity.import"))
+            {
+                SetStatus("Sua função não tem permissão para importar neste projeto.", true);
+                return;
+            }
+
             _busy = true;
             var ver = asset.latest_version;
             SetStatus($"Downloading {ver.file_name}…", false);

@@ -39,6 +39,21 @@ namespace AntiGravity.PipelineTool.Editor
             return resp.projects ?? Array.Empty<ProjectInfo>();
         }
 
+        /// <summary>
+        /// Permissões efetivas do usuário no projeto selecionado. Usado só para
+        /// esconder controles — quem decide de verdade é o servidor, em cada rota.
+        /// </summary>
+        public static async Task<UserPermissions> GetPermissionsAsync(string projectId = null)
+        {
+            await EnsureValidTokenAsync();
+            var url = $"{PipelineSettings.ApiBaseUrl}/api/user/permissions";
+            if (!string.IsNullOrEmpty(projectId))
+                url += $"?project_id={Uri.EscapeDataString(projectId)}";
+
+            var json = await GetAsync(url);
+            return JsonUtility.FromJson<UserPermissions>(json);
+        }
+
         // ------------------------------------------------------------------ //
         // Assets
 

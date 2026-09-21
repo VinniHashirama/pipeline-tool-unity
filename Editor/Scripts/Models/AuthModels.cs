@@ -44,4 +44,19 @@ namespace AntiGravity.PipelineTool.Editor.Models
         public string id;
         public string name;
     }
+
+    /// <summary>
+    /// Resposta de GET /api/user/permissions.
+    /// Achatada de propósito: JsonUtility não desserializa Dictionary nem array
+    /// na raiz, então a lista de permissões vem como string[] dentro do objeto.
+    /// </summary>
+    [Serializable]
+    internal class UserPermissions
+    {
+        public string[] allowed;
+        public bool     is_admin;
+        public string   role;
+        public bool     enforcement_enabled;
+        public long     matrix_version;
+    }
 }

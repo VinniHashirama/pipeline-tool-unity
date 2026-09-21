@@ -21,9 +21,9 @@ Editor/
     ├── Models/
     │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response (inclui AssetCategory)
     │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
-    │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse
-    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag)
-    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetApprovedAssets, GetProjectAssetsForSync, MarkImported
+    │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse, UserPermissions
+    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag, permissões)
+    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported
     ├── AssetDownloader.cs          — download via proxy + hierarquia de pastas local (TypePlural/Category?/AssetTitle/) + registra entrada no manifesto
     ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash
     ├── PipelineSyncStatus.cs       — overlay de ícone de sync na aba Project (projectWindowItemOnGUI) + refresh contra o servidor
@@ -235,3 +235,36 @@ git push
 git tag v0.2.0
 git push origin v0.2.0
 ```
+
+## Permissões
+
+Depois do login (e ao reabrir a janela com sessão restaurada), o tool chama:
+
+```
+GET /api/user/permissions?project_id=<uuid>
+Authorization: Bearer <access_token>
+```
+
+A resposta é achatada de propósito — o `JsonUtility` não desserializa `Dictionary` nem array na raiz, então a lista vem como `string[]` dentro do objeto:
+
+```json
+{
+  "allowed": ["asset.download", "unity.import", "..."],
+  "is_admin": false,
+  "role": "tech_artist",
+  "enforcement_enabled": false,
+  "matrix_version": 3
+}
+```
+
+As permissões ficam no `EditorPrefs` (`PipelineTool.Permissions`, separadas por vírgula) e são consultadas por `PipelineSettings.Can("unity.import")`. Como são **por projeto**, trocar o projeto no dropdown dispara um novo fetch.
+
+O botão **Import** fica desabilitado sem `unity.import`, e `ImportAsync` também corta na entrada. Isso é só conveniência: quem decide é o servidor, em `PATCH /api/assets/[id]/mark-imported`, que responde 403.
+
+**Admin vê todos os projetos** — `GET /api/user/projects` devolve o sistema inteiro quando o chamador tem `is_admin`, sem precisar se adicionar como membro de cada projeto. O Unity não precisou mudar para isso.
+
+### Gotcha: "ainda não carregou" ≠ "não pode nada"
+
+`PipelineSettings.Can()` devolve `true` enquanto as permissões não chegaram — sessão recém-restaurada, rede fora — para que a janela não fique inutilizável por falta de dado. Por isso existe a flag separada `PipelineTool.PermissionsLoaded`: sem ela, um usuário que realmente não tem permissão nenhuma (lista vazia) seria confundido com "ainda não carregou" e veria tudo habilitado.
+
+`ClearSession()` limpa as três chaves (`Permissions`, `PermissionsLoaded`, `IsAdmin`) junto com os tokens.
