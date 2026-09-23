@@ -27,7 +27,7 @@ namespace AntiGravity.PipelineTool.Editor
     }
 
     /// <summary>
-    /// Local record of which assets in this Unity project came from the Pipeline Tool,
+    /// Local record of which assets in this Unity project came from Hopper,
     /// which version they were downloaded at, and a content hash to detect local edits.
     /// Keyed by asset GUID (not path) so it survives renames/moves — the GUID is only ever
     /// read via AssetDatabase, never written into the asset's own .meta file.
@@ -80,7 +80,7 @@ namespace AntiGravity.PipelineTool.Editor
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[PipelineTool] Failed to read {ManifestPath}: {ex.Message}");
+                UnityEngine.Debug.LogWarning($"[Hopper] Failed to read {ManifestPath}: {ex.Message}");
             }
         }
 

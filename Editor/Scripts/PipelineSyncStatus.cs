@@ -65,7 +65,7 @@ namespace AntiGravity.PipelineTool.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[PipelineTool] Sync status refresh failed: {ex.Message}");
+                Debug.LogWarning($"[Hopper] Sync status refresh failed: {ex.Message}");
             }
             finally
             {

@@ -37,10 +37,21 @@ namespace AntiGravity.PipelineTool.Editor
 
         // ------------------------------------------------------------------ //
 
-        [MenuItem("Pipeline Tool/Import Window")]
+        // O ícone entra no pacote junto com a arte final. Até lá, a aba usa o
+        // ícone genérico do Editor em vez de quebrar.
+        private const string IconPath =
+            "Packages/com.antigravity.pipeline-tool/Editor/Icons/hopper-icon.png";
+
+        [MenuItem("Hopper/Import Window")]
         public static void Open()
         {
-            var w = GetWindow<PipelineImportWindow>("Pipeline Tool");
+            var w = GetWindow<PipelineImportWindow>("Hopper");
+
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(IconPath);
+            w.titleContent = icon != null
+                ? new GUIContent("Hopper", icon)
+                : new GUIContent("Hopper");
+
             w.minSize = new Vector2(480, 400);
             w.Show();
         }
@@ -92,7 +103,7 @@ namespace AntiGravity.PipelineTool.Editor
             GUILayout.Space(24);
             EditorGUILayout.BeginVertical();
 
-            EditorGUILayout.LabelField("Pipeline Tool", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Hopper", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Sign in to access the import tool.", EditorStyles.miniLabel);
             EditorGUILayout.Space(16);
 
@@ -225,7 +236,7 @@ namespace AntiGravity.PipelineTool.Editor
             var canImport = PipelineSettings.Can("unity.import");
             GUI.enabled = !_busy && ver != null && canImport;
             if (GUILayout.Button(new GUIContent("Import",
-                    canImport ? null : "Sua função não tem permissão para importar neste projeto"),
+                    canImport ? null : "Your role cannot import in this project"),
                     GUILayout.Width(65)))
                 _ = ImportAsync(asset);
             GUI.enabled = true;
@@ -351,7 +362,7 @@ namespace AntiGravity.PipelineTool.Editor
             {
                 // Falha aqui não deve travar a janela: o botão segue habilitado e
                 // o servidor recusa se for o caso.
-                Debug.LogWarning($"[Pipeline Tool] Não foi possível carregar permissões: {ex.Message}");
+                Debug.LogWarning($"[Hopper] Could not load permissions: {ex.Message}");
             }
             finally
             {
@@ -462,7 +473,7 @@ namespace AntiGravity.PipelineTool.Editor
             // também é alcançável por outro caminho de código.
             if (!PipelineSettings.Can("unity.import"))
             {
-                SetStatus("Sua função não tem permissão para importar neste projeto.", true);
+                SetStatus("Your role cannot import in this project.", true);
                 return;
             }
 
@@ -490,7 +501,7 @@ namespace AntiGravity.PipelineTool.Editor
                 }
                 else
                 {
-                    SetStatus("Server returned success=false. Check the Pipeline Tool dashboard.", true);
+                    SetStatus("Server returned success=false. Check the Hopper dashboard.", true);
                 }
             }
             catch (Exception ex)

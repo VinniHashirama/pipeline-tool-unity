@@ -1,6 +1,11 @@
-# CLAUDE.md — Pipeline Tool Unity Package
+# CLAUDE.md — Hopper Unity Package
 
-Unity UPM package providing an Editor window to import approved 3D assets from Pipeline Tool.
+Unity UPM package providing an Editor window to import approved 3D assets from Hopper.
+
+O nome visível é **Hopper**; os identificadores internos (package name, namespace
+`AntiGravity.PipelineTool.*`, chaves de `EditorPrefs`, `.pipeline-manifest.json`) mantêm o
+nome antigo de propósito — renomeá-los quebra instalações existentes. Ver `BRAND.md` na raiz
+do workspace.
 Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cross-repo architecture and API contract.
 
 ## Package identity
@@ -111,14 +116,14 @@ Ao abrir um projeto Unity que referencia este package via `file:`, o Rider cria 
 
 ## Configuração
 
-Abra **Pipeline Tool > Import Window**. Na primeira abertura, o tool exibe uma tela de login.
+Abra **Hopper > Import Window**. Na primeira abertura, o tool exibe uma tela de login.
 
 ### Tela de Login
 
 | Campo | Descrição |
 |---|---|
 | Server | Dropdown: **Local** (localhost:3000) · **Production** (URL Vercel) · **Custom** (campo livre) |
-| Email | Email da conta no Pipeline Tool (mesma usada na web app) |
+| Email | Email da conta no Hopper (mesma usada na web app) |
 | Password | Senha da conta |
 
 O picker de servidor aparece **antes** do login — permite escolher o ambiente sem precisar logar primeiro.

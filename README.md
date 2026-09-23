@@ -1,8 +1,9 @@
-# Pipeline Tool — Import Client
+# 🐸 Hopper — Import Client
 
-Unity Editor window para listar e importar assets 3D aprovados direto do Pipeline Tool.
+Unity Editor window para listar e importar assets 3D aprovados direto do Hopper.
 
-- **Package name:** `com.antigravity.pipeline-tool`
+- **Package name:** `com.antigravity.pipeline-tool` *(o identificador mantém o nome antigo
+  de propósito — trocá-lo quebraria o `manifest.json` de projetos já instalados)*
 - **Repositório:** https://github.com/VinniHashirama/pipeline-tool-unity
 - **Unity mínimo:** 2021.3 LTS
 
@@ -52,7 +53,7 @@ Para desenvolvimento local:
 
 ## Configuração
 
-Abra **Pipeline Tool > Import Window** na barra de menus do Unity.
+Abra **Hopper > Import Window** na barra de menus do Unity.
 
 Na primeira abertura, o tool exibe a **tela de login**.
 
@@ -61,7 +62,7 @@ Na primeira abertura, o tool exibe a **tela de login**.
 | Campo | Descrição |
 |---|---|
 | **Server** | Dropdown: **Local** (localhost:3000) · **Production** (pipeline-tool-web.vercel.app) · **Custom** (campo livre) |
-| **Email** | Email da conta no Pipeline Tool (mesma usada na web app) |
+| **Email** | Email da conta no Hopper (mesma usada na web app) |
 | **Password** | Senha da conta |
 
 Escolha o servidor antes de inserir as credenciais. A seleção é salva automaticamente no `EditorPrefs` — não precisa reconfigurar ao reabrir o Editor.
