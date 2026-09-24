@@ -19,6 +19,8 @@ namespace AntiGravity.PipelineTool.Editor
             { "vfx",          "VFX"          },
             { "ui",           "UI"           },
             { "audio",        "Audio"        },
+            { "texture",      "Textures"     },
+            { "material",     "Materials"    },
             { "other",        "Other"        },
         };
 
