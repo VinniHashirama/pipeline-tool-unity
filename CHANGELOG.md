@@ -1,13 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] — 2026-09-25
 
 ### Added
 - Pastas `Textures/` e `Materials/` para os tipos `texture` e `material`. Antes caíam em `Other/`.
   Sai antes do backend publicar esses tipos, para que o estúdio já esteja atualizado quando a
   primeira textura chegar — mudar a pasta depois do primeiro import deixaria o arquivo antigo órfão.
 
-## [0.1.0] — Unreleased
+## [0.1.0]
 
 ### Added
 - Editor window (`Hopper > Import Window`) to list approved assets

@@ -20,7 +20,7 @@ Abra **Window > Package Manager**, clique no botão **+** no canto superior esqu
 Escolha **"Add package from git URL…"** e cole:
 
 ```
-https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0
+https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0
 ```
 
 Para fixar em uma versão específica, adicione `#v<semver>` ao final. Omita a tag para usar sempre o latest `main` (apenas em dev).
@@ -34,7 +34,7 @@ Escolha **"Add package from disk…"** e navegue até o `package.json` dentro da
 ```json
 {
   "dependencies": {
-    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0"
+    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0"
   }
 }
 ```

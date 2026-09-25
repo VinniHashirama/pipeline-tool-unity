@@ -98,14 +98,14 @@ Ao abrir um projeto Unity que referencia este package via `file:`, o Rider cria 
 
 `Window > Package Manager` → botão `+` → escolha:
 
-- **Add package from git URL** → `https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0`
+- **Add package from git URL** → `https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0`
 - **Add package from disk** → navegue até o `package.json` da pasta local
 
 ### `Packages/manifest.json`
 
 ```json
 // Pinado em versão (QA / produção)
-"com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.1.0"
+"com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0"
 
 // Latest main (só em dev, sem pin)
 "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git"

@@ -1,6 +1,6 @@
 {
   "name": "com.antigravity.pipeline-tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "Hopper — Import Client",
   "description": "Unity Editor window for listing and importing approved 3D assets from Hopper.",
   "unity": "2021.3",
