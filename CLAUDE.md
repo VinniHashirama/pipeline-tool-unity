@@ -167,7 +167,8 @@ GET /api/assets/{id}/download?version_id={vid}
 Authorization: Bearer <access_token>
 ```
 
-O servidor busca o arquivo no storage correto (Supabase ou GDrive) e entrega como stream. Isso resolve dois problemas:
+Sem `version_id`, o servidor entrega a versão **publicada** do asset (o ponteiro `published_version_id`,
+desde a migration 005 do web app). O servidor busca o arquivo no storage correto (Supabase ou GDrive) e entrega como stream. Isso resolve dois problemas:
 - **Supabase Storage:** bucket privado — URLs públicas não funcionam sem auth
 - **Google Drive:** `file_url` no banco é um path relativo (`/api/gdrive/file/{id}`), sem hostname
 
@@ -179,15 +180,27 @@ O `AssetDownloader` cria automaticamente a hierarquia de pastas no projeto Unity
 [Target Folder]/
   Props/
     Industrial/          ← categoria (se definida)
-      PROP_Conteiner/    ← título da task
-        PROP_Conteiner_v3.fbx
+      PROP_Conteiner/    ← título do asset
+        SM_Conteiner.fbx ← file_name ESTÁVEL: o mesmo em toda versão
   Characters/
     CH_Guerreiro/
-      CH_Guerreiro_v1.fbx
+      SK_Guerreiro.fbx
+  Textures/
+    T_Conteiner_Diffuse/
+      T_Conteiner_Diffuse.png
 ```
 
 **Mapeamento de tipos:**
-`prop → Props` · `character → Characters` · `environment → Environments` · `vfx → VFX` · `ui → UI` · `audio → Audio` · `other → Other`
+`prop → Props` · `character → Characters` · `environment → Environments` · `vfx → VFX` · `ui → UI` · `audio → Audio` · `texture → Textures` · `material → Materials` · `other → Other` (textura e material desde a v0.2.0)
+
+**O nome do arquivo não muda entre versões** — desde a migration 006 do web app, o servidor garante
+que toda versão de um asset tem o mesmo `file_name` (o storage guarda `SM_Conteiner_v3.fbx`, mas
+o Unity recebe `SM_Conteiner.fbx`). Por isso importar a v4 **substitui** o arquivo da v3 no mesmo
+caminho, preservando o GUID e as referências de prefab e material.
+
+**O que ainda muda o caminho:** tipo, categoria e título do asset entram no path. Trocar qualquer
+um deles depois do import faz o próximo download cair num caminho novo, e o arquivo antigo fica
+órfão no projeto — o mesmo vale para "Renomear asset" no web app, que avisa isso na tela.
 
 Assets sem categoria vão direto sob o tipo: `Props/PROP_Cadeira/file.fbx`.
 
@@ -201,8 +214,8 @@ Depois de importar um asset, o tool grava uma entrada em `.pipeline-manifest.jso
 
 | Ícone | Estado | Significado |
 |---|---|---|
-| `✓` verde | Synced | O arquivo local bate com a versão mais recente aprovada/importada no servidor |
-| `!` laranja | Outdated | Existe uma versão mais nova no servidor do que a baixada localmente |
+| `✓` verde | Synced | O arquivo local bate com a versão **publicada** no servidor |
+| `!` laranja | Outdated | O servidor publicou uma versão mais nova do que a baixada localmente |
 | `M` azul | Modified Locally | O conteúdo do arquivo local mudou desde o download (hash diverge) — provável edição manual fora do pipeline |
 
 ### Formato do manifesto
@@ -219,6 +232,13 @@ Depois de importar um asset, o tool grava uma entrada em `.pipeline-manifest.jso
 
 Como é um arquivo único compartilhado, existe risco residual de conflito de merge quando duas pessoas importam/atualizam assets diferentes em paralelo — mitigado mantendo as entradas sempre ordenadas por GUID antes de salvar (ajuda o merge automático do git). Na prática é um conflito de JSON simples de resolver manualmente. Se isso virar recorrente, um merge driver customizado é a próxima etapa — não implementado agora.
 
+> **⚠️ Ícones não estão aparecendo** (registrado em 24/set/2026, antes da migration 005 do web app).
+> O servidor responde certo. Suspeita: o manifesto do `dungeon-delivery` mistura entradas de
+> **produção e de staging** (imports feitos com o server picker em cada um), e o refresh pode estar
+> falhando antes de desenhar. Diagnosticar pelo aviso `[Hopper] Sync status refresh failed` no
+> Console. Enquanto isso, `pipeline-tool/scripts/check-manifest.mjs` confere um manifesto contra o
+> banco de forma objetiva.
+
 ### Quando o refresh de sync acontece
 
 Nunca dentro do callback de desenho (`projectWindowItemOnGUI`, que roda a cada repaint da aba Project) — isso só lê os dicionários já calculados em memória. A chamada de rede (`PipelineSyncStatus.RefreshAsync`) dispara em dois lugares:
@@ -231,6 +251,11 @@ O toggle **Auto-refresh on Editor start**, na aba Settings, desliga o gatilho au
 ## Releases
 
 Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
+
+| Versão | Data | O que muda |
+|---|---|---|
+| `v0.2.0` | 25/set/2026 | Pastas `Textures/` e `Materials/`. Publicada **antes** do backend servir texturas, para que nenhuma textura fosse importada em `Other/` e ficasse órfã na atualização |
+| `v0.1.0` | — | Primeira versão |
 
 ```bash
 # Edite package.json: "version": "0.2.0"
