@@ -18,6 +18,9 @@ namespace AntiGravity.PipelineTool.Editor
         public string task_title;
         public string local_hash;
         public int version_number;
+        // v0.3 — files that came from an Item. Empty for assets imported by type.
+        public string item_id;
+        public string engine_path; // as the server sent it, relative to the Target Folder
     }
 
     [Serializable]
@@ -52,11 +55,28 @@ namespace AntiGravity.PipelineTool.Editor
             return _cache.Values;
         }
 
-        public static void Set(string guid, ManifestEntry entry)
+        /// <summary>Entries of one Hopper asset. More than one only for legacy orphans (a path changed before v0.3).</summary>
+        public static List<ManifestEntry> FindByAssetId(string assetId)
+        {
+            EnsureLoaded();
+            var found = new List<ManifestEntry>();
+            foreach (var entry in _cache.Values)
+                if (entry.asset_id == assetId) found.Add(entry);
+            return found;
+        }
+
+        /// <param name="save">false when writing several entries in a row; call Save() at the end.</param>
+        public static void Set(string guid, ManifestEntry entry, bool save = true)
         {
             EnsureLoaded();
             _cache[guid] = entry;
-            Save();
+            if (save) Save();
+        }
+
+        public static void Remove(string guid, bool save = true)
+        {
+            EnsureLoaded();
+            if (_cache.Remove(guid) && save) Save();
         }
 
         public static void Reload() => Load();
@@ -84,8 +104,9 @@ namespace AntiGravity.PipelineTool.Editor
             }
         }
 
-        private static void Save()
+        public static void Save()
         {
+            EnsureLoaded();
             var dir = Path.GetDirectoryName(ManifestPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);

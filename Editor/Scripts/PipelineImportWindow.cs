@@ -21,6 +21,12 @@ namespace AntiGravity.PipelineTool.Editor
         private List<ApprovedAsset> _assets = new();
         private Vector2             _scroll;
 
+        // Items (v0.3). _items has every published Item, imported ones included:
+        // the list shows the pending ones, _moves is computed over all of them.
+        private List<PublishedItem> _items = new();
+        private List<PlannedMove>   _moves = new();
+        private bool                _showMoves;
+
         // Login form
         private string _email    = "";
         private string _password = "";
@@ -192,7 +198,10 @@ namespace AntiGravity.PipelineTool.Editor
             DrawStatusBar();
             EditorGUILayout.Space(4);
 
-            if (_assets.Count == 0 && !_busy)
+            DrawMovesBanner();
+
+            var pendingItems = _items.FindAll(i => i.status != "imported");
+            if (_assets.Count == 0 && pendingItems.Count == 0 && !_busy)
             {
                 var msg = string.IsNullOrEmpty(PipelineSettings.ProjectId)
                     ? "Select a project in Settings, then click Refresh."
@@ -202,9 +211,89 @@ namespace AntiGravity.PipelineTool.Editor
             }
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
+            if (pendingItems.Count > 0)
+            {
+                EditorGUILayout.LabelField("Items", EditorStyles.miniBoldLabel);
+                foreach (var item in pendingItems)
+                    DrawItemRow(item);
+                if (_assets.Count > 0)
+                {
+                    EditorGUILayout.Space(6);
+                    EditorGUILayout.LabelField("Assets", EditorStyles.miniBoldLabel);
+                }
+            }
             foreach (var asset in _assets)
                 DrawAssetRow(asset);
             EditorGUILayout.EndScrollView();
+        }
+
+        // Files the manifest knows at one path while Hopper says another: the
+        // Item changed category, or its folder was dragged by hand. Never moved
+        // without a click (D12).
+        private void DrawMovesBanner()
+        {
+            if (_moves.Count == 0) return;
+
+            var itemCount = new HashSet<string>(_moves.ConvertAll(m => m.ItemName)).Count;
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(
+                $"{itemCount} Item(s) changed place in Hopper — {_moves.Count} file(s) to move.",
+                EditorStyles.wordWrappedLabel);
+
+            _showMoves = EditorGUILayout.Foldout(_showMoves, "From → To", true);
+            if (_showMoves)
+            {
+                foreach (var move in _moves)
+                {
+                    EditorGUILayout.LabelField(move.From, EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField($"  → {move.To}", EditorStyles.miniLabel);
+                }
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            GUI.enabled = !_busy && PipelineSettings.Can("unity.import");
+            if (GUILayout.Button("Move", GUILayout.Width(70)))
+                MoveAll();
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(4);
+        }
+
+        private void DrawItemRow(PublishedItem item)
+        {
+            var files = item.files ?? Array.Empty<ItemFile>();
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField(item.name, EditorStyles.boldLabel);
+            var pending = Array.FindAll(files, f => f.status != "imported").Length;
+            EditorGUILayout.LabelField(
+                $"{item.item_type}  ·  {files.Length} file(s), {pending} new  ·  {item.engine_folder}/",
+                EditorStyles.miniLabel);
+            foreach (var file in files)
+            {
+                var mark = file.status == "imported" ? "✓" : "•";
+                EditorGUILayout.LabelField(
+                    $"  {mark} {file.file_name}  v{file.version_number}  ·  {FormatBytes(file.file_size_bytes)}",
+                    EditorStyles.miniLabel);
+            }
+            EditorGUILayout.EndVertical();
+
+            GUILayout.FlexibleSpace();
+
+            var canImport = PipelineSettings.Can("unity.import");
+            GUI.enabled = !_busy && files.Length > 0 && canImport;
+            if (GUILayout.Button(new GUIContent("Import",
+                    canImport ? null : "Your role cannot import in this project"),
+                    GUILayout.Width(65)))
+                _ = ImportItemAsync(item);
+            GUI.enabled = true;
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawStatusBar()
@@ -318,8 +407,16 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.Space(12);
             if (GUILayout.Button("Save Settings"))
             {
-                PipelineSettings.ImportTargetPath = _importPath;
-                SetStatus("Settings saved.", false);
+                try
+                {
+                    PipelineSettings.ImportTargetPath = PathSafety.NormalizeTarget(_importPath);
+                    _importPath = PipelineSettings.ImportTargetPath;
+                    SetStatus("Settings saved.", false);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    SetStatus(ex.Message, true);
+                }
             }
         }
 
@@ -406,6 +503,8 @@ namespace AntiGravity.PipelineTool.Editor
         {
             PipelineSettings.ClearSession();
             _assets         = new List<ApprovedAsset>();
+            _items          = new List<PublishedItem>();
+            _moves          = new List<PlannedMove>();
             _projects       = Array.Empty<ProjectInfo>();
             _projectsLoaded = false;
             _projectIndex   = 0;
@@ -426,7 +525,22 @@ namespace AntiGravity.PipelineTool.Editor
 
                 var response = await PipelineApiClient.GetApprovedAssetsAsync(projectId);
                 _assets = new List<ApprovedAsset>(response.assets ?? Array.Empty<ApprovedAsset>());
-                SetStatus($"{_assets.Count} approved asset(s) ready to import.", false);
+
+                var items = await PipelineApiClient.GetPublishedItemsAsync(projectId);
+                _items = new List<PublishedItem>(items.items);
+                PipelineManifest.Reload();
+                _moves = ItemImporter.PlanMoves(_items);
+
+                var pendingItems = _items.FindAll(i => i.status != "imported").Count;
+                SetStatus(pendingItems > 0
+                    ? $"{pendingItems} Item(s) and {_assets.Count} asset(s) ready to import."
+                    : $"{_assets.Count} approved asset(s) ready to import.", false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // PathSafety: a path from the server (or the Target Folder) was refused.
+                _moves = new List<PlannedMove>();
+                SetStatus(ex.Message, true);
             }
             catch (Exception ex)
             {
@@ -492,7 +606,7 @@ namespace AntiGravity.PipelineTool.Editor
                         Repaint();
                     });
 
-                var result = await PipelineApiClient.MarkImportedAsync(asset.id, ver.id);
+                var result = await PipelineApiClient.MarkImportedAsync(asset.id, ver.id, GitInfo.HeadCommit());
 
                 if (result.success)
                 {
@@ -513,6 +627,93 @@ namespace AntiGravity.PipelineTool.Editor
                 _busy = false;
                 Repaint();
             }
+        }
+
+        private async Task ImportItemAsync(PublishedItem item)
+        {
+            if (!PipelineSettings.Can("unity.import"))
+            {
+                SetStatus("Your role cannot import in this project.", true);
+                return;
+            }
+
+            // A file of this Item still at its old place must move first,
+            // otherwise the import would write a second copy at the new path.
+            var moves = _moves.FindAll(m => m.ItemName == item.name);
+            if (moves.Count > 0)
+            {
+                if (!ConfirmMoves(moves)) return;
+                var errors = ItemImporter.ApplyMoves(moves);
+                _moves.RemoveAll(m => moves.Contains(m));
+                if (errors.Count > 0)
+                {
+                    SetStatus($"Could not move: {string.Join(" · ", errors)}", true);
+                    Repaint();
+                    return;
+                }
+            }
+
+            _busy = true;
+            Repaint();
+            try
+            {
+                var result = await ItemImporter.ImportAsync(item, msg =>
+                {
+                    _status = msg;
+                    _statusError = false;
+                    Repaint();
+                });
+
+                if (result.success)
+                {
+                    foreach (var file in item.files ?? Array.Empty<ItemFile>())
+                        file.status = "imported";
+                    item.status = "imported";
+                    SetStatus($"Imported: {item.name} → {item.engine_folder}/. Commit the files, the .meta and the manifest.", false);
+                }
+                else
+                {
+                    SetStatus("Server returned success=false. Check the Hopper dashboard.", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus(ex.Message.Contains("409")
+                    ? $"{item.name} changed in Hopper since the list was loaded — click Refresh and import again."
+                    : $"Import failed: {ex.Message}", true);
+            }
+            finally
+            {
+                _busy = false;
+                Repaint();
+            }
+        }
+
+        private void MoveAll()
+        {
+            if (!ConfirmMoves(_moves)) return;
+            var count = _moves.Count;
+            var errors = ItemImporter.ApplyMoves(_moves);
+            _moves = new List<PlannedMove>();
+            SetStatus(errors.Count == 0
+                ? $"Moved {count} file(s). Commit the moves (files, .meta and manifest) so other machines get them."
+                : $"Could not move: {string.Join(" · ", errors)}", errors.Count > 0);
+            Repaint();
+        }
+
+        private static bool ConfirmMoves(List<PlannedMove> moves)
+        {
+            var lines = moves.ConvertAll(m => $"{m.From}\n  → {m.To}");
+            var shown = lines.Count > 8 ? lines.GetRange(0, 8) : lines;
+            var more  = lines.Count > 8 ? $"\n… and {lines.Count - 8} more" : "";
+            return EditorUtility.DisplayDialog(
+                "Move files to their new place?",
+                "These files are not where Hopper says they belong — the Item changed category, or its folder " +
+                "was moved by hand (Hopper is the source of truth for the path). Moving keeps their GUIDs, so scene " +
+                "and prefab references survive; code that loads by path (Resources.Load) will break.\n\n" +
+                string.Join("\n", shown) + more +
+                "\n\nThe move becomes a commit in this repo.",
+                "Move", "Cancel");
         }
 
         // ------------------------------------------------------------------ //

@@ -40,6 +40,12 @@ namespace AntiGravity.PipelineTool.Editor
                 foreach (var asset in response.assets ?? Array.Empty<ApprovedAsset>())
                     if (asset.latest_version != null)
                         latest[asset.id] = asset.latest_version.version_number;
+
+                // Files of Items are not in /approved (v0.3 feed).
+                var items = await PipelineApiClient.GetPublishedItemsAsync(projectId);
+                foreach (var item in items.items)
+                foreach (var file in item.files ?? Array.Empty<ItemFile>())
+                    latest[file.asset_id] = file.version_number;
                 _latestVersionByAssetId = latest;
 
                 PipelineManifest.Reload();

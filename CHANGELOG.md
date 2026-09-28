@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0] — 2026-09-28
+
+### Added
+- Import por Item (projetos organizados por Item no Hopper): lista de Itens na aba Assets, "Import"
+  traz todos os arquivos do Item que vão para a engine, no `engine_path` que o servidor manda.
+- "Item(s) changed place": quando um arquivo de Item não está onde o Hopper diz (pasta arrastada à
+  mão), a janela mostra De/Para e move de volta com `AssetDatabase.MoveAsset` — só com clique.
+  Preserva GUID e referências; pastas que ficam vazias são removidas.
+- Labels nos arquivos de Item: `Hopper`, tipo e categoria (sem label por Item, para não inundar a lista). Labels postas à mão são mantidas.
+- Commit hash real no mark-imported (`git rev-parse HEAD` do projeto).
+
+### Fixed
+- Path traversal: um `file_name` com `../` vindo do servidor escrevia fora da pasta, e o Target Folder
+  aceitava caminho fora de `Assets/`. Todo caminho passa agora por `PathSafety`.
+- O download renova o token antes de começar (uma sessão longa falhava o download).
+
 ## [0.2.0] — 2026-09-25
 
 ### Added
