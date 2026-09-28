@@ -216,10 +216,11 @@ confere, em `PathSafety.Combine`, que ele fica dentro do Target Folder. Importar
 os arquivos dele que vão para a engine e marca em lote (`POST /api/items/{id}/mark-imported`), com
 o `HEAD` do repo como commit hash. Cada arquivo ganha labels `Hopper`, código, tipo e categoria.
 
-**Mudou de lugar (D12 do `item-architecture.md`):** a troca de categoria acontece só no Hopper. No
-Refresh, se o manifesto conhece um arquivo num caminho diferente do `engine_path`, a janela mostra
-"N Item(s) changed place" com De/Para e o botão **Move**. É o mesmo aviso quando alguém arrastou a
-pasta à mão: o Hopper é a fonte da verdade do caminho. Mover usa `AssetDatabase.MoveAsset`
+**Fora do lugar:** o Hopper é a fonte da verdade do caminho. No Refresh, se o manifesto conhece um
+arquivo num caminho diferente do `engine_path` (alguém arrastou a pasta à mão), a janela mostra
+"N Item(s) changed place" com De/Para e o botão **Move**. Hoje o `engine_path` de um Item não muda:
+a troca de categoria (D12 do `item-architecture.md`) foi adiada, e quando voltar usa este mesmo
+aviso. Mover usa `AssetDatabase.MoveAsset`
 (preserva GUID e referências) e apaga as pastas que ficaram vazias. **Nunca move sem clique.** O
 movimento vai para as outras máquinas pelo Git — arquivos, `.meta` e manifesto —, e lá o manifesto
 já bate com o servidor, então ninguém move de novo.
@@ -280,7 +281,7 @@ Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
 
 | Versão | Data | O que muda |
 |---|---|---|
-| `v0.3.0` | — (branch `feat/import-by-item`) | Import por Item com `engine_path` do servidor, mover com confirmação (D12), `PathSafety` nos dois fluxos, commit hash real, token renovado antes do download, labels. Precisa do web com a Fase 4 (`/api/items/published`); contra um servidor sem ela, a lista de Itens só fica vazia |
+| `v0.3.0` | — (branch `feat/import-by-item`) | Import por Item com `engine_path` do servidor, mover de volta com confirmação, `PathSafety` nos dois fluxos, commit hash real, token renovado antes do download, labels. Precisa do web com a Fase 4 (`/api/items/published`); contra um servidor sem ela, a lista de Itens só fica vazia |
 | `v0.2.0` | 25/set/2026 | Pastas `Textures/` e `Materials/`. Publicada **antes** do backend servir texturas, para que nenhuma textura fosse importada em `Other/` e ficasse órfã na atualização |
 | `v0.1.0` | — | Primeira versão |
 

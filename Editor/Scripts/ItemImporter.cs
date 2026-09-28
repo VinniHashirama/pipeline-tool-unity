@@ -20,12 +20,12 @@ namespace AntiGravity.PipelineTool.Editor
     }
 
     /// <summary>
-    /// Import by Item (v0.3, D12 of item-architecture.md). The server decides
+    /// Import by Item (v0.3, Phase 5 of item-architecture.md). The server decides
     /// where each file goes (engine_path); this class checks the path, downloads,
     /// writes, labels and records it in the manifest.
     ///
-    /// When a file the manifest knows is somewhere else — the Item changed
-    /// category in Hopper, or someone dragged the folder by hand — it is never
+    /// When a file the manifest knows is somewhere else — someone dragged the
+    /// folder by hand, or (once D12 comes back) the Item changed category — it is never
     /// moved silently: PlanMoves lists it, the window asks, ApplyMoves moves it
     /// with AssetDatabase.MoveAsset, which keeps the GUID and every scene and
     /// prefab reference. The move reaches other machines through Git (files,
