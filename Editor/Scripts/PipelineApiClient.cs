@@ -164,6 +164,39 @@ namespace AntiGravity.PipelineTool.Editor
             return req.downloadHandler.data;
         }
 
+        /// <summary>
+        /// Image at a relative API path (an Item's thumbnail_url), with the same auth
+        /// headers as every call. Returns null instead of throwing: a thumbnail that
+        /// fails — offline, 404, a format Unity cannot decode such as WebP — just
+        /// leaves the placeholder. The caller owns (and destroys) the texture.
+        /// </summary>
+        public static async Task<Texture2D> DownloadTextureAsync(string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath)) return null;
+            try
+            {
+                await EnsureValidTokenAsync();
+                var url = relativePath.StartsWith("/", StringComparison.Ordinal)
+                    ? PipelineSettings.ApiBaseUrl + relativePath
+                    : $"{PipelineSettings.ApiBaseUrl}/{relativePath}";
+
+                using var req = UnityWebRequestTexture.GetTexture(url, nonReadable: true);
+                ApplyAuthHeaders(req);
+                var op = req.SendWebRequest();
+                while (!op.isDone)
+                    await Task.Yield();
+
+                if (req.result != UnityWebRequest.Result.Success) return null;
+                var tex = DownloadHandlerTexture.GetContent(req);
+                if (tex != null) tex.hideFlags = HideFlags.HideAndDontSave;
+                return tex;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         // ------------------------------------------------------------------ //
         // Internals
 

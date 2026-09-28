@@ -26,6 +26,30 @@ namespace AntiGravity.PipelineTool.Editor
         private List<PublishedItem> _items = new();
         private List<PlannedMove>   _moves = new();
         private bool                _showMoves;
+        private bool                _showUpToDate;
+
+        // What each Item row offers (v0.4), computed against the manifest once per
+        // Refresh/import instead of on every repaint. Cleared → recomputed lazily.
+        private enum RowAction { Import, Update, UpToDate }
+
+        private class ItemRowState
+        {
+            public RowAction Action;
+            public string    Subtitle;
+            public string    Tooltip;
+        }
+
+        private readonly Dictionary<string, ItemRowState> _itemStates = new();
+
+        // Thumbnails (v0.4), keyed by thumbnail_url. A null value is a failed load:
+        // placeholder until the next Refresh retries it. _thumbGeneration drops the
+        // result of a request that finished after the cache was cleared.
+        private readonly Dictionary<string, Texture2D> _thumbs        = new();
+        private readonly HashSet<string>               _thumbsLoading = new();
+        private string                                 _thumbsProjectId;
+        private int                                    _thumbGeneration;
+
+        private const float ThumbSize = 40f;
 
         // Login form
         private string _email    = "";
@@ -79,6 +103,14 @@ namespace AntiGravity.PipelineTool.Editor
             if (PipelineSettings.IsLoggedIn && PipelineSettings.AutoRefreshSyncOnStartup &&
                 !string.IsNullOrEmpty(PipelineSettings.ProjectId))
                 _ = PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
+        }
+
+        // Also runs before a domain reload: textures made at runtime are not
+        // collected on their own (HideAndDontSave), so they go here.
+        private void OnDisable()
+        {
+            ClearThumbnails();
+            HopperStyles.Release();
         }
 
         private void OnGUI()
@@ -184,8 +216,21 @@ namespace AntiGravity.PipelineTool.Editor
 
         private void DrawAssetsTab()
         {
+            // Items needing Import/Update first; up-to-date ones fold away below.
+            var pending  = new List<PublishedItem>();
+            var upToDate = new List<PublishedItem>();
+            var anyUpdate = false;
+            foreach (var item in _items)
+            {
+                var state = StateOf(item);
+                if (state.Action == RowAction.UpToDate) { upToDate.Add(item); continue; }
+                pending.Add(item);
+                anyUpdate |= state.Action == RowAction.Update;
+            }
+
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Approved Assets", EditorStyles.boldLabel);
+            var project = string.IsNullOrEmpty(PipelineSettings.ProjectName) ? "Hopper" : PipelineSettings.ProjectName;
+            GUILayout.Label($"{project}  ·  {pending.Count + _assets.Count} to import", HopperStyles.Header);
             GUILayout.FlexibleSpace();
             GUI.enabled = !_busy;
             if (GUILayout.Button("Sync Status", GUILayout.Width(85)))
@@ -200,8 +245,7 @@ namespace AntiGravity.PipelineTool.Editor
 
             DrawMovesBanner();
 
-            var pendingItems = _items.FindAll(i => i.status != "imported");
-            if (_assets.Count == 0 && pendingItems.Count == 0 && !_busy)
+            if (_assets.Count == 0 && _items.Count == 0 && !_busy)
             {
                 var msg = string.IsNullOrEmpty(PipelineSettings.ProjectId)
                     ? "Select a project in Settings, then click Refresh."
@@ -211,20 +255,53 @@ namespace AntiGravity.PipelineTool.Editor
             }
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
-            if (pendingItems.Count > 0)
+
+            DrawItemCard(pending);
+
+            if (anyUpdate)
+                GUILayout.Label(
+                    "Update replaces the file in place: scene and prefab references keep working.",
+                    HopperStyles.Note);
+
+            if (upToDate.Count > 0)
             {
-                EditorGUILayout.LabelField("Items", EditorStyles.miniBoldLabel);
-                foreach (var item in pendingItems)
-                    DrawItemRow(item);
-                if (_assets.Count > 0)
-                {
-                    EditorGUILayout.Space(6);
-                    EditorGUILayout.LabelField("Assets", EditorStyles.miniBoldLabel);
-                }
+                _showUpToDate = EditorGUILayout.Foldout(_showUpToDate, $"Up to date ({upToDate.Count})", true);
+                if (_showUpToDate)
+                    DrawItemCard(upToDate);
             }
-            foreach (var asset in _assets)
-                DrawAssetRow(asset);
+
+            if (_assets.Count > 0)
+            {
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Assets", EditorStyles.miniBoldLabel);
+                EditorGUILayout.BeginVertical(HopperStyles.Card);
+                for (var i = 0; i < _assets.Count; i++)
+                {
+                    if (i > 0) DrawSeparator();
+                    DrawAssetRow(_assets[i]);
+                }
+                EditorGUILayout.EndVertical();
+            }
+
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawItemCard(List<PublishedItem> items)
+        {
+            if (items.Count == 0) return;
+            EditorGUILayout.BeginVertical(HopperStyles.Card);
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (i > 0) DrawSeparator();
+                DrawItemRow(items[i]);
+            }
+            EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawSeparator()
+        {
+            var rect = GUILayoutUtility.GetRect(1f, 1f, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, HopperStyles.Separator);
         }
 
         // Files the manifest knows at one path while Hopper says another: the
@@ -264,36 +341,120 @@ namespace AntiGravity.PipelineTool.Editor
         private void DrawItemRow(PublishedItem item)
         {
             var files = item.files ?? Array.Empty<ItemFile>();
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.BeginHorizontal();
+            var state = StateOf(item);
+            var type  = HopperStyles.Type(item.item_type);
 
-            EditorGUILayout.BeginVertical();
-            EditorGUILayout.LabelField(item.name, EditorStyles.boldLabel);
-            var pending = Array.FindAll(files, f => f.status != "imported").Length;
-            EditorGUILayout.LabelField(
-                $"{item.item_type}  ·  {files.Length} file(s), {pending} new  ·  {item.engine_folder}/",
-                EditorStyles.miniLabel);
-            foreach (var file in files)
+            BeginRow();
+            DrawThumbnail(item.thumbnail_url, type);
+            DrawRowText(type, item.name, state.Subtitle, state.Tooltip);
+
+            if (state.Action == RowAction.UpToDate)
             {
-                var mark = file.status == "imported" ? "✓" : "•";
-                EditorGUILayout.LabelField(
-                    $"  {mark} {file.file_name}  v{file.version_number}  ·  {FormatBytes(file.file_size_bytes)}",
-                    EditorStyles.miniLabel);
+                EditorGUILayout.BeginVertical(GUILayout.Width(80));
+                GUILayout.Space(9);
+                GUI.enabled = false;
+                GUILayout.Button("✓ Imported", GUILayout.Width(80), GUILayout.Height(22));
+                GUI.enabled = true;
+                EditorGUILayout.EndVertical();
             }
-            EditorGUILayout.EndVertical();
+            else
+            {
+                // Both go through ImportItemAsync: moves first, then files written
+                // in place at engine_path (same GUID, so references survive).
+                var label = state.Action == RowAction.Update ? "Update" : "Import";
+                if (DrawActionButton(label, files.Length > 0))
+                    _ = ImportItemAsync(item);
+            }
+            EndRow();
+        }
 
-            GUILayout.FlexibleSpace();
+        private void DrawAssetRow(ApprovedAsset asset)
+        {
+            var ver  = asset.latest_version;
+            var type = HopperStyles.Type(asset.asset_type);
+            var subtitle = ver != null
+                ? $"{type.Label}  ·  v{ver.version_number}  ·  {ver.file_format}  ·  {FormatBytes(ver.file_size_bytes)}"
+                : $"{type.Label}  ·  no version";
+            var tooltip = $"{asset.project?.name ?? asset.project_id}" + (ver != null ? $"\n{ver.file_name}" : "");
 
-            var canImport = PipelineSettings.Can("unity.import");
-            GUI.enabled = !_busy && files.Length > 0 && canImport;
-            if (GUILayout.Button(new GUIContent("Import",
-                    canImport ? null : "Your role cannot import in this project"),
-                    GUILayout.Width(65)))
-                _ = ImportItemAsync(item);
-            GUI.enabled = true;
+            BeginRow();
+            DrawThumbnail(null, type);
+            DrawRowText(type, asset.title, subtitle, tooltip);
+            if (DrawActionButton("Import", ver != null))
+                _ = ImportAsync(asset);
+            EndRow();
+        }
 
+        // ------------------------------------------------------------------ //
+        // Row pieces — thumb | badge + name / subtitle | action
+
+        private static void BeginRow()
+        {
+            EditorGUILayout.BeginHorizontal(GUILayout.MinHeight(ThumbSize + 12));
+            GUILayout.Space(8);
+            EditorGUILayout.BeginVertical();
+            GUILayout.Space(6);
+            EditorGUILayout.BeginHorizontal();
+        }
+
+        private static void EndRow()
+        {
             EditorGUILayout.EndHorizontal();
+            GUILayout.Space(6);
             EditorGUILayout.EndVertical();
+            GUILayout.Space(8);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private static void DrawRowText(TypeInfo type, string name, string subtitle, string tooltip)
+        {
+            GUILayout.Space(8);
+            EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+            GUILayout.Space(3);
+            EditorGUILayout.BeginHorizontal();
+            var badge   = HopperStyles.Badge(type);
+            var content = new GUIContent(type.Label);
+            GUILayout.Label(content, badge, GUILayout.Width(badge.CalcSize(content).x));
+            GUILayout.Label(new GUIContent(name, tooltip), HopperStyles.Title, GUILayout.MinWidth(40));
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Label(new GUIContent(subtitle, tooltip), HopperStyles.Subtitle, GUILayout.MinWidth(40));
+            EditorGUILayout.EndVertical();
+        }
+
+        private bool DrawActionButton(string label, bool available)
+        {
+            var canImport = PipelineSettings.Can("unity.import");
+            EditorGUILayout.BeginVertical(GUILayout.Width(80));
+            GUILayout.Space(9);
+            GUI.enabled = !_busy && available && canImport;
+            var prevBg = GUI.backgroundColor;
+            if (GUI.enabled)
+                GUI.backgroundColor = label == "Update" ? HopperStyles.Amber : new Color(0.55f, 0.75f, 1f);
+            var clicked = GUILayout.Button(
+                new GUIContent(label, canImport ? null : "Your role cannot import in this project"),
+                GUILayout.Width(80), GUILayout.Height(22));
+            GUI.backgroundColor = prevBg;
+            GUI.enabled = true;
+            EditorGUILayout.EndVertical();
+            return clicked;
+        }
+
+        private void DrawThumbnail(string url, TypeInfo type)
+        {
+            var rect = GUILayoutUtility.GetRect(ThumbSize, ThumbSize,
+                GUILayout.Width(ThumbSize), GUILayout.Height(ThumbSize));
+            var tex = ThumbnailFor(url);
+            if (tex != null)
+            {
+                GUI.DrawTexture(rect, tex, ScaleMode.ScaleAndCrop);
+                return;
+            }
+
+            EditorGUI.DrawRect(rect, HopperStyles.Placeholder);
+            var prev = GUI.contentColor;
+            GUI.contentColor = type.Color;
+            GUI.Label(rect, type.Glyph, HopperStyles.Glyph);
+            GUI.contentColor = prev;
         }
 
         private void DrawStatusBar()
@@ -303,35 +464,6 @@ namespace AntiGravity.PipelineTool.Editor
             GUI.color = _statusError ? new Color(1f, 0.4f, 0.4f) : new Color(0.5f, 1f, 0.5f);
             EditorGUILayout.LabelField(_status, EditorStyles.helpBox);
             GUI.color = prev;
-        }
-
-        private void DrawAssetRow(ApprovedAsset asset)
-        {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.BeginHorizontal();
-
-            EditorGUILayout.BeginVertical();
-            EditorGUILayout.LabelField(asset.title, EditorStyles.boldLabel);
-
-            var ver  = asset.latest_version;
-            var info = ver != null
-                ? $"{asset.asset_type}  ·  {asset.project?.name ?? asset.project_id}  ·  v{ver.version_number}  ·  {ver.file_format}  ·  {FormatBytes(ver.file_size_bytes)}"
-                : $"{asset.asset_type}  ·  {asset.project?.name ?? asset.project_id}  ·  no version";
-            EditorGUILayout.LabelField(info, EditorStyles.miniLabel);
-            EditorGUILayout.EndVertical();
-
-            GUILayout.FlexibleSpace();
-
-            var canImport = PipelineSettings.Can("unity.import");
-            GUI.enabled = !_busy && ver != null && canImport;
-            if (GUILayout.Button(new GUIContent("Import",
-                    canImport ? null : "Your role cannot import in this project"),
-                    GUILayout.Width(65)))
-                _ = ImportAsync(asset);
-            GUI.enabled = true;
-
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.EndVertical();
         }
 
         // ------------------------------------------------------------------ //
@@ -508,6 +640,8 @@ namespace AntiGravity.PipelineTool.Editor
             _projects       = Array.Empty<ProjectInfo>();
             _projectsLoaded = false;
             _projectIndex   = 0;
+            _itemStates.Clear();
+            ClearThumbnails();
             SetStatus("", false);
             Repaint();
         }
@@ -529,9 +663,11 @@ namespace AntiGravity.PipelineTool.Editor
                 var items = await PipelineApiClient.GetPublishedItemsAsync(projectId);
                 _items = new List<PublishedItem>(items.items);
                 PipelineManifest.Reload();
+                _itemStates.Clear();
+                PruneThumbnails(projectId);
                 _moves = ItemImporter.PlanMoves(_items);
 
-                var pendingItems = _items.FindAll(i => i.status != "imported").Count;
+                var pendingItems = _items.FindAll(i => StateOf(i).Action != RowAction.UpToDate).Count;
                 SetStatus(pendingItems > 0
                     ? $"{pendingItems} Item(s) and {_assets.Count} asset(s) ready to import."
                     : $"{_assets.Count} approved asset(s) ready to import.", false);
@@ -684,6 +820,8 @@ namespace AntiGravity.PipelineTool.Editor
             }
             finally
             {
+                // The manifest changed, even on a partial failure: recompute the rows.
+                _itemStates.Clear();
                 _busy = false;
                 Repaint();
             }
@@ -714,6 +852,123 @@ namespace AntiGravity.PipelineTool.Editor
                 string.Join("\n", shown) + more +
                 "\n\nThe move becomes a commit in this repo.",
                 "Move", "Cancel");
+        }
+
+        // ------------------------------------------------------------------ //
+        // Item row state — Import / Update / up to date, against the local manifest
+
+        private ItemRowState StateOf(PublishedItem item)
+        {
+            var key = item.id ?? item.name ?? "";
+            if (_itemStates.TryGetValue(key, out var cached)) return cached;
+            var state = ComputeState(item);
+            _itemStates[key] = state;
+            return state;
+        }
+
+        // Import: this machine has none of the Item's files. Update: it has some,
+        // and a file is new to the server's import record or the server published
+        // a higher version than the one downloaded. Anything else is up to date.
+        private static ItemRowState ComputeState(PublishedItem item)
+        {
+            var files = item.files ?? Array.Empty<ItemFile>();
+            var type  = HopperStyles.Type(item.item_type);
+            var known   = 0;
+            var changes = new List<string>();
+            var lines   = new List<string>();
+
+            foreach (var file in files)
+            {
+                var entries = PipelineManifest.FindByAssetId(file.asset_id);
+                var local = 0;
+                foreach (var e in entries) local = Math.Max(local, e.version_number);
+                if (entries.Count > 0) known++;
+
+                var behind = entries.Count > 0 && file.version_number > local;
+                if (behind || file.status != "imported")
+                {
+                    changes.Add(entries.Count == 0
+                        ? $"{file.file_name} (new)"
+                        : local == file.version_number
+                            ? $"{file.file_name} v{file.version_number}"
+                            : $"{file.file_name} v{local} → v{file.version_number}");
+                }
+                var mark = entries.Count > 0 && !behind ? "✓" : "•";
+                lines.Add($"{mark} {file.file_name}  v{file.version_number}  ·  {FormatBytes(file.file_size_bytes)}");
+            }
+
+            var state = new ItemRowState { Tooltip = $"{item.engine_folder}/\n" + string.Join("\n", lines) };
+            if (known == 0)
+            {
+                state.Action   = RowAction.Import;
+                var noun       = files.Length == 1 ? "new file" : "new files";
+                state.Subtitle = $"{type.Label}  ·  {files.Length} {noun}  ·  {item.engine_folder}/";
+            }
+            else if (changes.Count > 0)
+            {
+                state.Action   = RowAction.Update;
+                var more       = changes.Count > 1 ? $"  +{changes.Count - 1} more" : "";
+                state.Subtitle = $"{type.Label}  ·  {changes[0]}{more}";
+            }
+            else
+            {
+                state.Action   = RowAction.UpToDate;
+                var noun       = files.Length == 1 ? "file" : "files";
+                state.Subtitle = $"{type.Label}  ·  {files.Length} {noun}  ·  {item.engine_folder}/";
+            }
+            return state;
+        }
+
+        // ------------------------------------------------------------------ //
+        // Thumbnails — lazy, one request per url, destroyed with the window
+
+        private Texture2D ThumbnailFor(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+            if (_thumbs.TryGetValue(url, out var tex)) return tex; // null = failed, placeholder
+            if (_thumbsLoading.Add(url))
+                _ = LoadThumbnailAsync(url, _thumbGeneration);
+            return null;
+        }
+
+        private async Task LoadThumbnailAsync(string url, int generation)
+        {
+            var tex = await PipelineApiClient.DownloadTextureAsync(url);
+            if (this == null || generation != _thumbGeneration)
+            {
+                // The window closed or the cache was cleared meanwhile.
+                if (tex != null) DestroyImmediate(tex);
+                return;
+            }
+            _thumbsLoading.Remove(url);
+            _thumbs[url] = tex;
+            if (tex != null) Repaint();
+        }
+
+        private void ClearThumbnails()
+        {
+            foreach (var tex in _thumbs.Values)
+                if (tex != null) DestroyImmediate(tex);
+            _thumbs.Clear();
+            _thumbsLoading.Clear();
+            _thumbsProjectId = null;
+            _thumbGeneration++;
+        }
+
+        // On Refresh: another project drops everything; the same one keeps what
+        // loaded and retries what failed.
+        private void PruneThumbnails(string projectId)
+        {
+            if (_thumbsProjectId != projectId)
+            {
+                ClearThumbnails();
+                _thumbsProjectId = projectId;
+                return;
+            }
+            var failed = new List<string>();
+            foreach (var pair in _thumbs)
+                if (pair.Value == null) failed.Add(pair.Key);
+            foreach (var url in failed) _thumbs.Remove(url);
         }
 
         // ------------------------------------------------------------------ //

@@ -26,6 +26,9 @@ namespace AntiGravity.PipelineTool.Editor.Models
         public ItemCategory category;
         public string engine_folder; // Props/Industrial/PR001_Chair
         public string status;        // approved | imported
+        // v0.4 — relative path (/api/assets/{asset_id}/thumbnail), fetched with the
+        // same auth headers. Empty when the Item has none or the server is older.
+        public string thumbnail_url;
         public ItemFile[] files;
     }
 
