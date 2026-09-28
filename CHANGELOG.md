@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0] — não publicada
+
+### Changed
+- Visual novo da aba Assets: lista em card escuro, cada Item com thumbnail, badge colorido do tipo,
+  nome, subtítulo e um botão só. Cabeçalho `{Projeto} · N to import`.
+- O botão sai do manifesto local: **Import** (nenhum arquivo do Item aqui), **Update** (versão nova no
+  servidor — o subtítulo mostra `SK_CH001_Hero.fbx v2 → v3`) ou "✓ Imported". Os Itens em dia ficam
+  num foldout "Up to date (N)". Quando há Update, uma nota lembra que o arquivo é substituído no lugar
+  e as referências de cena e prefab continuam valendo.
+- A lista de assets por tipo (legado) ganhou o mesmo visual, com placeholder no lugar da thumbnail.
+
+### Added
+- Thumbnail do Item via `GET /api/assets/{id}/thumbnail` (campo `thumbnail_url`, relativo, com os
+  mesmos headers de auth). Carrega sob demanda e cai no placeholder quando falha ou quando o
+  servidor ainda não manda o campo.
+
 ## [0.3.0] — 2026-09-28
 
 ### Added

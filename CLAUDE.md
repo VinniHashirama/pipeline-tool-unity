@@ -12,7 +12,7 @@ Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cros
 
 ```
 name:    com.antigravity.pipeline-tool
-version: 0.3.0
+version: 0.4.0
 unity:   2021.3+
 repo:    https://github.com/VinniHashirama/pipeline-tool-unity
 ```
@@ -29,14 +29,15 @@ Editor/
     │   ├── PublishedItem.cs        — mirrors GET /api/items/published e POST /api/items/{id}/mark-imported (v0.3)
     │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse, UserPermissions
     ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag, permissões)
-    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported, GetPublishedItems, MarkItemImported, Download
+    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported, GetPublishedItems, MarkItemImported, Download, DownloadTexture (thumbnail, v0.4)
+    ├── HopperStyles.cs             — estilos da janela (v0.4): card escuro, badge colorido por tipo, placeholder de thumbnail, nota âmbar — criados sob demanda, recriados após domain reload
     ├── PathSafety.cs               — TODO caminho escrito passa aqui: relativo, sem `..`, dentro do Target Folder, que fica dentro de Assets/
     ├── AssetDownloader.cs          — import por tipo: hierarquia local (TypePlural/Category?/AssetTitle/) + manifesto
     ├── ItemImporter.cs             — import por Item (v0.3): engine_path do servidor, plano De/Para e MoveAsset, labels
     ├── GitInfo.cs                  — `git rev-parse HEAD` do projeto, enviado como commit_hash
     ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash (+ item_id/engine_path)
     ├── PipelineSyncStatus.cs       — overlay de ícone de sync na aba Project (projectWindowItemOnGUI) + refresh contra o servidor
-    └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab (Refresh / Sync Status) + Settings tab
+    └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab (lista de Itens com thumbnail e Import/Update, Refresh / Sync Status) + Settings tab
 ```
 
 Everything is Editor-only — no Runtime assembly. The package has no dependency on other UPM packages.
@@ -102,14 +103,14 @@ Ao abrir um projeto Unity que referencia este package via `file:`, o Rider cria 
 
 `Window > Package Manager` → botão `+` → escolha:
 
-- **Add package from git URL** → `https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0`
+- **Add package from git URL** → `https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.3.0`
 - **Add package from disk** → navegue até o `package.json` da pasta local
 
 ### `Packages/manifest.json`
 
 ```json
 // Pinado em versão (QA / produção)
-"com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0"
+"com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.3.0"
 
 // Latest main (só em dev, sem pin)
 "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git"
@@ -225,6 +226,19 @@ aviso. Mover usa `AssetDatabase.MoveAsset`
 movimento vai para as outras máquinas pelo Git — arquivos, `.meta` e manifesto —, e lá o manifesto
 já bate com o servidor, então ninguém move de novo.
 
+**A linha do Item (v0.4):** a lista mostra todos os Itens do feed. O botão sai do manifesto local:
+**Import** quando nenhum arquivo do Item é conhecido aqui, **Update** quando algum é e o servidor
+tem versão maior (ou um arquivo ainda não marcado como importado), "✓ Imported" no resto. Import e
+Update são a mesma chamada (`ImportItemAsync`): move primeiro, depois reescreve no mesmo
+`engine_path` — mesmo GUID, as referências de cena e prefab seguem valendo.
+
+**Thumbnails (v0.4):** cada Item traz `thumbnail_url`, um caminho **relativo**
+(`/api/assets/{asset_id}/thumbnail`) buscado em `ApiBaseUrl + thumbnail_url` com os mesmos headers
+de auth, como o download — nunca a URL do storage. `DownloadTextureAsync` devolve `null` em vez de
+lançar (offline, 404, WebP que o Unity não decodifica), e a linha fica com o placeholder (sigla do
+tipo). O cache da janela é por URL, uma requisição por vez, destruído no `OnDisable`, no Sign Out e
+na troca de projeto; um Refresh tenta de novo as que falharam.
+
 **Path traversal fechado nas duas rotas:** o fluxo por tipo também passa por `PathSafety` desde a
 v0.3 (antes, um `file_name` com `../` escrevia fora da pasta, e o Target Folder podia apontar para
 fora de `Assets/`).
@@ -281,17 +295,18 @@ Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
 
 | Versão | Data | O que muda |
 |---|---|---|
+| `v0.4.0` | — (branch `feat/unity-visual`) | Visual novo da janela: lista em card com thumbnail, badge colorido por tipo e um botão por Item — **Import** (nada local), **Update** (versão nova, subtítulo `v2 → v3`) ou "✓ Imported" (os em dia ficam num foldout). Thumbnail via `/api/assets/{id}/thumbnail`; contra um servidor sem `thumbnail_url`, só mostra o placeholder |
 | `v0.3.0` | 28/set/2026 | Import por Item com `engine_path` do servidor, mover de volta com confirmação, `PathSafety` nos dois fluxos, commit hash real, token renovado antes do download, labels. Precisa do web com a Fase 4 (`/api/items/published`); contra um servidor sem ela, a lista de Itens só fica vazia |
 | `v0.2.0` | 25/set/2026 | Pastas `Textures/` e `Materials/`. Publicada **antes** do backend servir texturas, para que nenhuma textura fosse importada em `Other/` e ficasse órfã na atualização |
 | `v0.1.0` | — | Primeira versão |
 
 ```bash
-# Edite package.json: "version": "0.2.0"
+# Edite package.json: "version": "0.4.0"
 git add package.json package.json.meta
-git commit -m "chore: bump version to 0.2.0"
+git commit -m "chore: bump version to 0.4.0"
 git push
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 ## Permissões
