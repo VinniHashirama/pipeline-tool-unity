@@ -12,7 +12,7 @@ Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cros
 
 ```
 name:    com.antigravity.pipeline-tool
-version: 0.1.0
+version: 0.3.0
 unity:   2021.3+
 repo:    https://github.com/VinniHashirama/pipeline-tool-unity
 ```
@@ -26,11 +26,15 @@ Editor/
     ├── Models/
     │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response (inclui AssetCategory)
     │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
+    │   ├── PublishedItem.cs        — mirrors GET /api/items/published e POST /api/items/{id}/mark-imported (v0.3)
     │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse, UserPermissions
     ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag, permissões)
-    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported
-    ├── AssetDownloader.cs          — download via proxy + hierarquia de pastas local (TypePlural/Category?/AssetTitle/) + registra entrada no manifesto
-    ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash
+    ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported, GetPublishedItems, MarkItemImported, Download
+    ├── PathSafety.cs               — TODO caminho escrito passa aqui: relativo, sem `..`, dentro do Target Folder, que fica dentro de Assets/
+    ├── AssetDownloader.cs          — import por tipo: hierarquia local (TypePlural/Category?/AssetTitle/) + manifesto
+    ├── ItemImporter.cs             — import por Item (v0.3): engine_path do servidor, plano De/Para e MoveAsset, labels
+    ├── GitInfo.cs                  — `git rev-parse HEAD` do projeto, enviado como commit_hash
+    ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash (+ item_id/engine_path)
     ├── PipelineSyncStatus.cs       — overlay de ícone de sync na aba Project (projectWindowItemOnGUI) + refresh contra o servidor
     └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab (Refresh / Sync Status) + Settings tab
 ```
@@ -204,6 +208,26 @@ um deles depois do import faz o próximo download cair num caminho novo, e o arq
 
 Assets sem categoria vão direto sob o tipo: `Props/PROP_Cadeira/file.fbx`.
 
+### Projetos por Item (v0.3)
+
+Num projeto organizado por Item, **o servidor decide o caminho**: `GET /api/items/published` manda
+um `engine_path` por arquivo (`Props/Industrial/PR001_Chair/SM_PR001_Chair.fbx`), e o plugin só
+confere, em `PathSafety.Combine`, que ele fica dentro do Target Folder. Importar um Item traz todos
+os arquivos dele que vão para a engine e marca em lote (`POST /api/items/{id}/mark-imported`), com
+o `HEAD` do repo como commit hash. Cada arquivo ganha labels `Hopper`, código, tipo e categoria.
+
+**Mudou de lugar (D12 do `item-architecture.md`):** a troca de categoria acontece só no Hopper. No
+Refresh, se o manifesto conhece um arquivo num caminho diferente do `engine_path`, a janela mostra
+"N Item(s) changed place" com De/Para e o botão **Move**. É o mesmo aviso quando alguém arrastou a
+pasta à mão: o Hopper é a fonte da verdade do caminho. Mover usa `AssetDatabase.MoveAsset`
+(preserva GUID e referências) e apaga as pastas que ficaram vazias. **Nunca move sem clique.** O
+movimento vai para as outras máquinas pelo Git — arquivos, `.meta` e manifesto —, e lá o manifesto
+já bate com o servidor, então ninguém move de novo.
+
+**Path traversal fechado nas duas rotas:** o fluxo por tipo também passa por `PathSafety` desde a
+v0.3 (antes, um `file_name` com `../` escrevia fora da pasta, e o Target Folder podia apontar para
+fora de `Assets/`).
+
 O **Target Folder** é configurável na aba Settings (default: `Assets/ImportedAssets`). O nome do projeto **não** faz parte do path local — a organização por projeto fica por conta do Target Folder escolhido pelo tech artist.
 
 Os modelos `ApprovedAsset` e `AssetCategory` em `Models/ApprovedAsset.cs` espelham o response do servidor (campo `category` é nullable).
@@ -225,7 +249,9 @@ Depois de importar um asset, o tool grava uma entrada em `.pipeline-manifest.jso
 ```json
 {
   "entries": [
-    { "guid": "a1b2c3...", "asset_id": "uuid", "version_id": "uuid", "version_number": 3, "task_title": "PROP_Conteiner", "local_hash": "sha1..." }
+    { "guid": "a1b2c3...", "asset_id": "uuid", "version_id": "uuid", "version_number": 3, "task_title": "PROP_Conteiner", "local_hash": "sha1..." },
+    { "guid": "d4e5f6...", "asset_id": "uuid", "version_id": "uuid", "version_number": 1, "task_title": "SM_PR001_Chair.fbx", "local_hash": "sha1...",
+      "item_id": "uuid", "engine_path": "Props/Industrial/PR001_Chair/SM_PR001_Chair.fbx" }
   ]
 }
 ```
@@ -254,6 +280,7 @@ Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
 
 | Versão | Data | O que muda |
 |---|---|---|
+| `v0.3.0` | — (branch `feat/import-by-item`) | Import por Item com `engine_path` do servidor, mover com confirmação (D12), `PathSafety` nos dois fluxos, commit hash real, token renovado antes do download, labels. Precisa do web com a Fase 4 (`/api/items/published`); contra um servidor sem ela, a lista de Itens só fica vazia |
 | `v0.2.0` | 25/set/2026 | Pastas `Textures/` e `Materials/`. Publicada **antes** do backend servir texturas, para que nenhuma textura fosse importada em `Other/` e ficasse órfã na atualização |
 | `v0.1.0` | — | Primeira versão |
 

@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using UnityEditor;
-using UnityEngine;
-using UnityEngine.Networking;
 using AntiGravity.PipelineTool.Editor.Models;
 
 namespace AntiGravity.PipelineTool.Editor
 {
+    /// <summary>
+    /// Import of assets by type (projects organized by type, /api/assets/approved).
+    /// Items use ItemImporter, where the server decides the path.
+    /// </summary>
     internal static class AssetDownloader
     {
         private static readonly Dictionary<string, string> TypeFolderNames = new Dictionary<string, string>
@@ -34,33 +36,14 @@ namespace AntiGravity.PipelineTool.Editor
             Action<float> onProgress = null)
         {
             var version = asset.latest_version;
+            // Validated before any byte arrives: nothing lands outside the Target Folder.
             var destPath = BuildDestPath(asset);
+
+            var data = await PipelineApiClient.DownloadAsync(asset.id, version.id, onProgress);
+
             var destDir = Path.GetDirectoryName(destPath);
-
-            if (!Directory.Exists(destDir))
+            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
                 Directory.CreateDirectory(destDir);
-
-            var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/{Uri.EscapeDataString(asset.id)}/download" +
-                      $"?version_id={Uri.EscapeDataString(version.id)}";
-
-            using var req = UnityWebRequest.Get(url);
-
-            var token = PipelineSettings.AccessToken;
-            if (!string.IsNullOrEmpty(token))
-                req.SetRequestHeader("Authorization", $"Bearer {token}");
-
-            var op = req.SendWebRequest();
-
-            while (!op.isDone)
-            {
-                onProgress?.Invoke(op.progress);
-                await Task.Yield();
-            }
-
-            if (req.result != UnityWebRequest.Result.Success)
-                throw new Exception($"Download failed ({req.responseCode}): {req.error}");
-
-            var data = req.downloadHandler.data;
             await Task.Run(() => File.WriteAllBytes(destPath, data));
 
             AssetDatabase.ImportAsset(destPath, ImportAssetOptions.ForceUpdate);
@@ -82,25 +65,17 @@ namespace AntiGravity.PipelineTool.Editor
         // [ImportTargetPath]/[TypePlural]/[Category?]/[AssetTitle]/filename
         private static string BuildDestPath(ApprovedAsset asset)
         {
-            var version = asset.latest_version;
-            var dir = PipelineSettings.ImportTargetPath;
-
             var typeName = TypeFolderNames.TryGetValue(asset.asset_type ?? "", out var t) ? t : "Other";
-            dir = Path.Combine(dir, typeName);
+            var segments = new List<string> { typeName };
 
             if (asset.category != null && !string.IsNullOrWhiteSpace(asset.category.name))
-                dir = Path.Combine(dir, SanitizeSegment(asset.category.name));
+                segments.Add(PathSafety.SanitizeSegment(asset.category.name));
 
-            dir = Path.Combine(dir, SanitizeSegment(asset.title));
+            segments.Add(PathSafety.SanitizeSegment(asset.title));
+            // file_name is the stable name from the server; it is a name, never a path.
+            segments.Add(asset.latest_version.file_name);
 
-            return Path.Combine(dir, version.file_name).Replace("\\", "/");
-        }
-
-        private static string SanitizeSegment(string name)
-        {
-            foreach (var c in Path.GetInvalidFileNameChars())
-                name = name.Replace(c, '_');
-            return name.Trim();
+            return PathSafety.Combine(PipelineSettings.ImportTargetPath, string.Join("/", segments));
         }
     }
 }

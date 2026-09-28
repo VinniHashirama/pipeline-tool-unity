@@ -97,6 +97,74 @@ namespace AntiGravity.PipelineTool.Editor
         }
 
         // ------------------------------------------------------------------ //
+        // Items (v0.3 — projects organized by Item)
+
+        /// <summary>
+        /// Items with the published version of each file that goes to the engine.
+        /// Always asks for imported ones too: they are needed to detect files whose
+        /// engine_path changed (category change) and to compute sync status.
+        /// Returns an empty response on a server without the endpoint (404).
+        /// </summary>
+        public static async Task<PublishedItemsResponse> GetPublishedItemsAsync(string projectId)
+        {
+            if (string.IsNullOrEmpty(projectId))
+                return new PublishedItemsResponse { items = Array.Empty<PublishedItem>() };
+
+            await EnsureValidTokenAsync();
+            var url = $"{PipelineSettings.ApiBaseUrl}/api/items/published?include_imported=true" +
+                      $"&project_id={Uri.EscapeDataString(projectId)}";
+            try
+            {
+                var json = await GetAsync(url);
+                var resp = JsonUtility.FromJson<PublishedItemsResponse>(json);
+                resp.items ??= Array.Empty<PublishedItem>();
+                return resp;
+            }
+            catch (Exception ex) when (ex.Message.StartsWith("HTTP 404", StringComparison.Ordinal))
+            {
+                return new PublishedItemsResponse { items = Array.Empty<PublishedItem>() };
+            }
+        }
+
+        public static async Task<ItemImportResult> MarkItemImportedAsync(string itemId, string[] versionIds, string commitHash)
+        {
+            await EnsureValidTokenAsync();
+            var url     = $"{PipelineSettings.ApiBaseUrl}/api/items/{Uri.EscapeDataString(itemId)}/mark-imported";
+            var payload = JsonUtility.ToJson(new MarkItemImportedPayload
+            {
+                version_ids = versionIds,
+                commit_hash = commitHash ?? "",
+            });
+            var json = await PostAsync(url, payload);
+            return JsonUtility.FromJson<ItemImportResult>(json);
+        }
+
+        /// <summary>
+        /// File bytes via the server proxy — Unity never talks to the storage
+        /// directly. Refreshes the token first: a long session would otherwise
+        /// fail the download and only then refresh.
+        /// </summary>
+        public static async Task<byte[]> DownloadAsync(string assetId, string versionId, Action<float> onProgress = null)
+        {
+            await EnsureValidTokenAsync();
+            var url = $"{PipelineSettings.ApiBaseUrl}/api/assets/{Uri.EscapeDataString(assetId)}/download" +
+                      $"?version_id={Uri.EscapeDataString(versionId)}";
+
+            using var req = UnityWebRequest.Get(url);
+            ApplyAuthHeaders(req);
+            var op = req.SendWebRequest();
+            while (!op.isDone)
+            {
+                onProgress?.Invoke(op.progress);
+                await Task.Yield();
+            }
+
+            if (req.result != UnityWebRequest.Result.Success)
+                throw new Exception($"Download failed ({req.responseCode}): {req.error}");
+            return req.downloadHandler.data;
+        }
+
+        // ------------------------------------------------------------------ //
         // Internals
 
         private static async Task EnsureValidTokenAsync()
@@ -191,6 +259,13 @@ namespace AntiGravity.PipelineTool.Editor
         private class MarkImportedPayload
         {
             public string version_id;
+            public string commit_hash;
+        }
+
+        [Serializable]
+        private class MarkItemImportedPayload
+        {
+            public string[] version_ids;
             public string commit_hash;
         }
     }
