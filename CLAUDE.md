@@ -214,7 +214,7 @@ Num projeto organizado por Item, **o servidor decide o caminho**: `GET /api/item
 um `engine_path` por arquivo (`Props/Industrial/PR001_Chair/SM_PR001_Chair.fbx`), e o plugin só
 confere, em `PathSafety.Combine`, que ele fica dentro do Target Folder. Importar um Item traz todos
 os arquivos dele que vão para a engine e marca em lote (`POST /api/items/{id}/mark-imported`), com
-o `HEAD` do repo como commit hash. Cada arquivo ganha labels `Hopper`, código, tipo e categoria.
+o `HEAD` do repo como commit hash. Cada arquivo ganha labels `Hopper`, tipo e categoria — sem label por Item (seria uma por objeto), e as labels postas à mão ficam.
 
 **Fora do lugar:** o Hopper é a fonte da verdade do caminho. No Refresh, se o manifesto conhece um
 arquivo num caminho diferente do `engine_path` (alguém arrastou a pasta à mão), a janela mostra

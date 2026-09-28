@@ -8,7 +8,7 @@
 - "Item(s) changed place": quando um arquivo de Item não está onde o Hopper diz (pasta arrastada à
   mão), a janela mostra De/Para e move de volta com `AssetDatabase.MoveAsset` — só com clique.
   Preserva GUID e referências; pastas que ficam vazias são removidas.
-- Labels nos arquivos de Item: `Hopper`, código, tipo e categoria.
+- Labels nos arquivos de Item: `Hopper`, tipo e categoria (sem label por Item, para não inundar a lista). Labels postas à mão são mantidas.
 - Commit hash real no mark-imported (`git rev-parse HEAD` do projeto).
 
 ### Fixed

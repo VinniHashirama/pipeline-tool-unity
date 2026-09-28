@@ -146,15 +146,20 @@ namespace AntiGravity.PipelineTool.Editor
             return await PipelineApiClient.MarkItemImportedAsync(item.id, toMark, GitInfo.HeadCommit());
         }
 
-        // Labels are free: type, category and code make the Item searchable in
-        // the Project window (l:PR001) without depending on the folder.
+        // Labels group, not identify: Hopper, type and category (l:Industrial).
+        // No label per Item — one per object would flood the label list; the
+        // Item already has its own folder and a unique name to search by.
+        // Labels someone added by hand are kept; SetLabels would replace them.
         private static void SetLabels(string path, PublishedItem item)
         {
             var asset = AssetDatabase.LoadMainAssetAtPath(path);
             if (asset == null) return;
-            var labels = new List<string> { "Hopper", item.code, item.item_type };
-            if (!string.IsNullOrEmpty(item.category?.name)) labels.Add(item.category.name);
-            AssetDatabase.SetLabels(asset, labels
+            var ours = new List<string> { "Hopper", item.item_type };
+            if (!string.IsNullOrEmpty(item.category?.name)) ours.Add(item.category.name);
+            var kept = AssetDatabase.GetLabels(asset)
+                .Where(l => l != item.code); // the per-Item label of the first v0.3 builds
+            AssetDatabase.SetLabels(asset, kept
+                .Concat(ours)
                 .Where(l => !string.IsNullOrWhiteSpace(l))
                 .Select(l => l.Replace(' ', '_'))
                 .Distinct()
