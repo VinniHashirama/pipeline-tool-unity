@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] — não publicada
+## [0.3.0] — 2026-09-28
 
 ### Added
 - Import por Item (projetos organizados por Item no Hopper): lista de Itens na aba Assets, "Import"
