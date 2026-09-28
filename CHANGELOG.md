@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0] — não publicada
+## [0.4.0] — 2026-09-28
 
 ### Changed
 - Visual novo da aba Assets: lista em card escuro, cada Item com thumbnail, badge colorido do tipo,
