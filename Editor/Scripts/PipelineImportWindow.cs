@@ -27,10 +27,11 @@ namespace AntiGravity.PipelineTool.Editor
         private List<PlannedMove>   _moves = new();
         private bool                _showMoves;
         private bool                _showUpToDate;
+        private bool                _showMissing;
 
         // What each Item row offers (v0.4), computed against the manifest once per
         // Refresh/import instead of on every repaint. Cleared → recomputed lazily.
-        private enum RowAction { Import, Update, UpToDate }
+        private enum RowAction { Import, Update, Reimport, UpToDate }
 
         private class ItemRowState
         {
@@ -69,7 +70,7 @@ namespace AntiGravity.PipelineTool.Editor
 
         // O ícone entra no pacote junto com a arte final. Até lá, a aba usa o
         // ícone genérico do Editor em vez de quebrar.
-        private const string IconPath =
+        internal const string IconPath =
             "Packages/com.antigravity.pipeline-tool/Editor/Icons/hopper-icon.png";
 
         [MenuItem("Hopper/Import Window")]
@@ -100,17 +101,26 @@ namespace AntiGravity.PipelineTool.Editor
             if (PipelineSettings.IsLoggedIn)
                 _ = LoadPermissionsAsync();
 
-            if (PipelineSettings.IsLoggedIn && PipelineSettings.AutoRefreshSyncOnStartup &&
-                !string.IsNullOrEmpty(PipelineSettings.ProjectId))
-                _ = PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
+            // Only when nothing is cached for this project: OnEnable also runs after
+            // every script compile, and the cache survives it (SessionState).
+            PipelineSyncStatus.EnsureChecked();
+            PipelineSyncStatus.Changed += OnSyncChanged;
         }
 
         // Also runs before a domain reload: textures made at runtime are not
         // collected on their own (HideAndDontSave), so they go here.
         private void OnDisable()
         {
+            PipelineSyncStatus.Changed -= OnSyncChanged;
             ClearThumbnails();
             HopperStyles.Release();
+        }
+
+        // A file deleted, restored or re-checked: the rows read the disk again.
+        private void OnSyncChanged()
+        {
+            _itemStates.Clear();
+            Repaint();
         }
 
         private void OnGUI()
@@ -244,6 +254,7 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.Space(4);
 
             DrawMovesBanner();
+            DrawMissingBanner();
 
             if (_assets.Count == 0 && _items.Count == 0 && !_busy)
             {
@@ -338,6 +349,41 @@ namespace AntiGravity.PipelineTool.Editor
             EditorGUILayout.Space(4);
         }
 
+        // Files in the manifest that are gone from disk. Covers both routes: assets by
+        // type that were imported are not in the list at all, so this is their only way
+        // back. Reimport keeps the GUID; Forget is for a deletion on purpose.
+        private void DrawMissingBanner()
+        {
+            var summary = PipelineSyncStatus.Summary;
+            if (summary.Missing == 0) return;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(
+                $"{summary.Missing} file(s) tracked by Hopper were deleted locally.",
+                EditorStyles.wordWrappedLabel);
+
+            _showMissing = EditorGUILayout.Foldout(_showMissing, "Files", true);
+            if (_showMissing)
+                foreach (var name in summary.MissingNames)
+                    EditorGUILayout.LabelField($"  {name}", EditorStyles.miniLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            GUI.enabled = !_busy;
+            if (GUILayout.Button(new GUIContent("Forget", "Deleted on purpose: stop tracking these files"), GUILayout.Width(70)))
+                ForgetMissing();
+            GUI.enabled = !_busy && PipelineSettings.Can("unity.import");
+            var prevBg = GUI.backgroundColor;
+            if (GUI.enabled) GUI.backgroundColor = PipelineSyncStatus.ColorOf(SyncState.Missing);
+            if (GUILayout.Button(new GUIContent("Reimport", "Download the published version again, keeping the original GUID"), GUILayout.Width(80)))
+                _ = ReimportMissingAsync();
+            GUI.backgroundColor = prevBg;
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(4);
+        }
+
         private void DrawItemRow(PublishedItem item)
         {
             var files = item.files ?? Array.Empty<ItemFile>();
@@ -361,7 +407,12 @@ namespace AntiGravity.PipelineTool.Editor
             {
                 // Both go through ImportItemAsync: moves first, then files written
                 // in place at engine_path (same GUID, so references survive).
-                var label = state.Action == RowAction.Update ? "Update" : "Import";
+                var label = state.Action switch
+                {
+                    RowAction.Update  => "Update",
+                    RowAction.Reimport => "Reimport",
+                    _                 => "Import",
+                };
                 if (DrawActionButton(label, files.Length > 0))
                     _ = ImportItemAsync(item);
             }
@@ -429,7 +480,12 @@ namespace AntiGravity.PipelineTool.Editor
             GUI.enabled = !_busy && available && canImport;
             var prevBg = GUI.backgroundColor;
             if (GUI.enabled)
-                GUI.backgroundColor = label == "Update" ? HopperStyles.Amber : new Color(0.55f, 0.75f, 1f);
+                GUI.backgroundColor = label switch
+                {
+                    "Update"  => HopperStyles.Amber,
+                    "Reimport" => PipelineSyncStatus.ColorOf(SyncState.Missing),
+                    _         => new Color(0.55f, 0.75f, 1f),
+                };
             var clicked = GUILayout.Button(
                 new GUIContent(label, canImport ? null : "Your role cannot import in this project"),
                 GUILayout.Width(80), GUILayout.Height(22));
@@ -702,19 +758,73 @@ namespace AntiGravity.PipelineTool.Editor
             SetStatus("Checking sync status…", false);
             Repaint();
 
+            // RefreshAsync does not throw: a failure lands in the summary, which the
+            // Scene View overlay shows too.
+            await PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
+            var error = PipelineSyncStatus.Summary.Error;
+            SetStatus(error ?? "Sync status updated.", error != null);
+            Repaint();
+        }
+
+        private async Task ReimportMissingAsync()
+        {
+            if (!PipelineSettings.Can("unity.import"))
+            {
+                SetStatus("Your role cannot import in this project.", true);
+                return;
+            }
+            var missing = PipelineSyncStatus.MissingEntries();
+            if (missing.Count == 0) return;
+            if (!EditorUtility.DisplayDialog(
+                    "Reimport deleted files?",
+                    $"{missing.Count} file(s) will be downloaded again from Hopper — the version published now, " +
+                    "where Hopper says it belongs — keeping their original GUID, so scene and prefab " +
+                    "references to them work again.\n\n" +
+                    "Import settings go back to their defaults. If the deletion is not committed yet, " +
+                    "`git checkout` of the files and their .meta brings those back too.",
+                    "Reimport", "Cancel"))
+                return;
+
+            _busy = true;
+            Repaint();
             try
             {
-                await PipelineSyncStatus.RefreshAsync(PipelineSettings.ProjectId);
-                SetStatus("Sync status updated.", false);
+                var errors = await AssetRestorer.ReimportAsync(missing, msg =>
+                {
+                    _status = msg;
+                    _statusError = false;
+                    Repaint();
+                });
+                SetStatus(errors.Count == 0
+                    ? $"Reimported {missing.Count} file(s)."
+                    : $"Could not reimport: {string.Join(" · ", errors)}", errors.Count > 0);
             }
             catch (Exception ex)
             {
-                SetStatus($"Sync status check failed: {ex.Message}", true);
+                SetStatus($"Reimport failed: {ex.Message}", true);
             }
             finally
             {
+                _busy = false;
                 Repaint();
             }
+        }
+
+        private void ForgetMissing()
+        {
+            var missing = PipelineSyncStatus.MissingEntries();
+            if (missing.Count == 0) return;
+            if (!EditorUtility.DisplayDialog(
+                    "Stop tracking deleted files?",
+                    $"{missing.Count} file(s) leave the manifest. Hopper keeps them as imported in its history; " +
+                    "if they are still published, they show up here as new, ready to import again.\n\n" +
+                    "Commit the manifest so other machines stop tracking them too.",
+                    "Forget", "Cancel"))
+                return;
+
+            AssetRestorer.Forget(missing);
+            SetStatus($"Stopped tracking {missing.Count} file(s). Commit the manifest.", false);
+            Repaint();
         }
 
         private async Task ImportAsync(ApprovedAsset asset)
@@ -761,6 +871,7 @@ namespace AntiGravity.PipelineTool.Editor
             finally
             {
                 _busy = false;
+                PipelineSyncStatus.Recompute();
                 Repaint();
             }
         }
@@ -823,6 +934,7 @@ namespace AntiGravity.PipelineTool.Editor
                 // The manifest changed, even on a partial failure: recompute the rows.
                 _itemStates.Clear();
                 _busy = false;
+                PipelineSyncStatus.Recompute();
                 Repaint();
             }
         }
@@ -866,7 +978,8 @@ namespace AntiGravity.PipelineTool.Editor
             return state;
         }
 
-        // Import: this machine has none of the Item's files. Update: it has some,
+        // Import: this machine has none of the Item's files. Reimport: the manifest
+        // knows a file that is gone from disk (deleted locally). Update: it has some,
         // and a file is new to the server's import record or the server published
         // a higher version than the one downloaded. Anything else is up to date.
         private static ItemRowState ComputeState(PublishedItem item)
@@ -875,6 +988,7 @@ namespace AntiGravity.PipelineTool.Editor
             var type  = HopperStyles.Type(item.item_type);
             var known   = 0;
             var changes = new List<string>();
+            var missing = new List<string>();
             var lines   = new List<string>();
 
             foreach (var file in files)
@@ -883,6 +997,13 @@ namespace AntiGravity.PipelineTool.Editor
                 var local = 0;
                 foreach (var e in entries) local = Math.Max(local, e.version_number);
                 if (entries.Count > 0) known++;
+
+                if (entries.Count > 0 && !entries.Exists(PipelineManifest.IsPresent))
+                {
+                    missing.Add(file.file_name);
+                    lines.Add($"× {file.file_name}  deleted locally");
+                    continue;
+                }
 
                 var behind = entries.Count > 0 && file.version_number > local;
                 if (behind || file.status != "imported")
@@ -903,6 +1024,13 @@ namespace AntiGravity.PipelineTool.Editor
                 state.Action   = RowAction.Import;
                 var noun       = files.Length == 1 ? "new file" : "new files";
                 state.Subtitle = $"{type.Label}  ·  {files.Length} {noun}  ·  {item.engine_folder}/";
+            }
+            else if (missing.Count > 0)
+            {
+                // Same call as Update: missing files are written back with their old GUID.
+                state.Action   = RowAction.Reimport;
+                var more       = missing.Count > 1 ? $"  +{missing.Count - 1} more" : "";
+                state.Subtitle = $"{type.Label}  ·  {missing[0]} missing{more}";
             }
             else if (changes.Count > 0)
             {

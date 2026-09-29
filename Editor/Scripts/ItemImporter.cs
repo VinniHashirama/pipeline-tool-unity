@@ -80,6 +80,7 @@ namespace AntiGravity.PipelineTool.Editor
                 if (entry != null)
                 {
                     entry.engine_path = move.EnginePath;
+                    entry.local_path  = move.To;
                     PipelineManifest.Set(move.Guid, entry, save: false);
                 }
                 emptied.Add(Path.GetDirectoryName(move.From)?.Replace('\\', '/'));
@@ -112,13 +113,9 @@ namespace AntiGravity.PipelineTool.Editor
                 var data = await PipelineApiClient.DownloadAsync(file.asset_id, file.version_id,
                     p => onStatus?.Invoke($"Downloading {file.file_name}… {p:P0}"));
 
-                var dir = Path.GetDirectoryName(dest);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
-                await Task.Run(() => File.WriteAllBytes(dest, data));
-                AssetDatabase.ImportAsset(dest, ImportAssetOptions.ForceUpdate);
-
-                var guid = AssetDatabase.AssetPathToGUID(dest);
+                // A tracked file deleted from here comes back with its old GUID,
+                // so scene and prefab references to it work again.
+                var guid = AssetRestorer.WriteAsset(dest, data, AssetRestorer.GuidToKeep(file.asset_id, dest));
                 SetLabels(dest, item);
                 // Entries of this asset left at another path (legacy orphans) are dropped:
                 // the file the manifest tracks is the one at engine_path.
@@ -134,6 +131,7 @@ namespace AntiGravity.PipelineTool.Editor
                     local_hash     = PipelineManifest.Sha1Hex(data),
                     item_id        = item.id,
                     engine_path    = file.engine_path,
+                    local_path     = dest,
                 }, save: false);
             }
             PipelineManifest.Save();

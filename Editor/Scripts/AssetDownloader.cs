@@ -41,14 +41,8 @@ namespace AntiGravity.PipelineTool.Editor
 
             var data = await PipelineApiClient.DownloadAsync(asset.id, version.id, onProgress);
 
-            var destDir = Path.GetDirectoryName(destPath);
-            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
-                Directory.CreateDirectory(destDir);
-            await Task.Run(() => File.WriteAllBytes(destPath, data));
-
-            AssetDatabase.ImportAsset(destPath, ImportAssetOptions.ForceUpdate);
-
-            var guid = AssetDatabase.AssetPathToGUID(destPath);
+            // A tracked file deleted from this path comes back with its old GUID.
+            var guid = AssetRestorer.WriteAsset(destPath, data, AssetRestorer.GuidToKeep(asset.id, destPath));
             PipelineManifest.Set(guid, new ManifestEntry
             {
                 guid = guid,
@@ -57,13 +51,15 @@ namespace AntiGravity.PipelineTool.Editor
                 version_number = version.version_number,
                 task_title = asset.title,
                 local_hash = PipelineManifest.Sha1Hex(data),
+                local_path = destPath,
             });
 
             return destPath;
         }
 
         // [ImportTargetPath]/[TypePlural]/[Category?]/[AssetTitle]/filename
-        private static string BuildDestPath(ApprovedAsset asset)
+        // Also used by PipelineSyncStatus to know where a deleted file belongs.
+        internal static string BuildDestPath(ApprovedAsset asset)
         {
             var typeName = TypeFolderNames.TryGetValue(asset.asset_type ?? "", out var t) ? t : "Other";
             var segments = new List<string> { typeName };

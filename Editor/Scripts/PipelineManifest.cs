@@ -7,7 +7,8 @@ using UnityEngine;
 
 namespace AntiGravity.PipelineTool.Editor
 {
-    public enum SyncState { Synced, Outdated, ModifiedLocally }
+    // Ordered from best to worst: a folder shows the worst state of what is inside it.
+    public enum SyncState { Synced, Outdated, ModifiedLocally, Missing }
 
     [Serializable]
     public class ManifestEntry
@@ -21,6 +22,9 @@ namespace AntiGravity.PipelineTool.Editor
         // v0.3 — files that came from an Item. Empty for assets imported by type.
         public string item_id;
         public string engine_path; // as the server sent it, relative to the Target Folder
+        // v0.5 — project-relative path the file was written to. Once the file is
+        // deleted its GUID resolves to nothing; this is where Reimport falls back to.
+        public string local_path;
     }
 
     [Serializable]
@@ -33,12 +37,18 @@ namespace AntiGravity.PipelineTool.Editor
     /// Local record of which assets in this Unity project came from Hopper,
     /// which version they were downloaded at, and a content hash to detect local edits.
     /// Keyed by asset GUID (not path) so it survives renames/moves — the GUID is only ever
-    /// read via AssetDatabase, never written into the asset's own .meta file.
+    /// read via AssetDatabase; the one exception is AssetRestorer, which writes a .meta
+    /// with the original GUID when bringing back a deleted file.
     /// Stored as a single committed file so the whole team shares sync visibility.
     /// </summary>
     internal static class PipelineManifest
     {
         private static Dictionary<string, ManifestEntry> _cache;
+        // Set/Remove with save: false keep changes only in memory (an import in
+        // progress, between downloads). Reload must not throw them away.
+        private static bool _dirty;
+
+        public static bool HasUnsavedChanges => _dirty;
 
         private static string ManifestPath =>
             Path.Combine(PipelineSettings.ImportTargetPath, ".pipeline-manifest.json").Replace("\\", "/");
@@ -71,15 +81,44 @@ namespace AntiGravity.PipelineTool.Editor
             EnsureLoaded();
             _cache[guid] = entry;
             if (save) Save();
+            else _dirty = true;
         }
 
         public static void Remove(string guid, bool save = true)
         {
             EnsureLoaded();
-            if (_cache.Remove(guid) && save) Save();
+            if (!_cache.Remove(guid)) return;
+            if (save) Save();
+            else _dirty = true;
         }
 
-        public static void Reload() => Load();
+        /// <summary>Re-reads the file (a git pull may have changed it), unless unsaved changes are pending.</summary>
+        public static void Reload()
+        {
+            if (!_dirty) Load();
+        }
+
+        /// <summary>The entry's file exists on disk.</summary>
+        public static bool IsPresent(ManifestEntry entry)
+        {
+            var path = AssetDatabase.GUIDToAssetPath(entry.guid);
+            return !string.IsNullOrEmpty(path) && File.Exists(path);
+        }
+
+        /// <summary>
+        /// Where the entry's file is, or was: the GUID's path (Unity still answers for a
+        /// recently deleted asset, until the Editor restarts), else the path recorded at
+        /// import, else the one the server gave (Items). Null when unknown.
+        /// </summary>
+        public static string KnownPath(ManifestEntry entry)
+        {
+            var path = AssetDatabase.GUIDToAssetPath(entry.guid);
+            if (!string.IsNullOrEmpty(path)) return path;
+            if (!string.IsNullOrEmpty(entry.local_path)) return entry.local_path;
+            if (string.IsNullOrEmpty(entry.engine_path)) return null;
+            try { return PathSafety.Combine(PipelineSettings.ImportTargetPath, entry.engine_path); }
+            catch (InvalidOperationException) { return null; }
+        }
 
         private static void EnsureLoaded()
         {
@@ -89,6 +128,7 @@ namespace AntiGravity.PipelineTool.Editor
         private static void Load()
         {
             _cache = new Dictionary<string, ManifestEntry>();
+            _dirty = false;
             if (!File.Exists(ManifestPath)) return;
 
             try
@@ -116,6 +156,7 @@ namespace AntiGravity.PipelineTool.Editor
 
             var file = new ManifestFile { entries = entries };
             File.WriteAllText(ManifestPath, JsonUtility.ToJson(file, true));
+            _dirty = false;
             AssetDatabase.Refresh();
         }
 

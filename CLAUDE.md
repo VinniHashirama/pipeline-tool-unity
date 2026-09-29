@@ -12,7 +12,7 @@ Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cros
 
 ```
 name:    com.antigravity.pipeline-tool
-version: 0.4.0
+version: 0.5.0
 unity:   2021.3+
 repo:    https://github.com/VinniHashirama/pipeline-tool-unity
 ```
@@ -35,8 +35,11 @@ Editor/
     ├── AssetDownloader.cs          — import por tipo: hierarquia local (TypePlural/Category?/AssetTitle/) + manifesto
     ├── ItemImporter.cs             — import por Item (v0.3): engine_path do servidor, plano De/Para e MoveAsset, labels
     ├── GitInfo.cs                  — `git rev-parse HEAD` do projeto, enviado como commit_hash
-    ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash (+ item_id/engine_path)
-    ├── PipelineSyncStatus.cs       — overlay de ícone de sync na aba Project (projectWindowItemOnGUI) + refresh contra o servidor
+    ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash (+ item_id/engine_path, local_path)
+    ├── PipelineSyncStatus.cs       — fonte única do estado de sync: refresh contra o servidor (cache em SessionState) + Recompute local (disco + manifesto) + ícones na aba Project
+    ├── PipelineAssetWatcher.cs     — AssetPostprocessor: mudança sob o Target Folder → Recompute (arquivo apagado vira Missing na hora, sem rede) (v0.5)
+    ├── AssetRestorer.cs            — Reimport (baixa de novo a versão publicada, com o GUID original) e Forget (tira do manifesto); WriteAsset usado pelos dois imports (v0.5)
+    ├── HopperSyncOverlay.cs        — overlay no Scene View: sapinho + bolinha + resumo + botão de refresh (v0.5)
     └── PipelineImportWindow.cs     — EditorWindow: tela de login + Assets tab (lista de Itens com thumbnail e Import/Update, Refresh / Sync Status) + Settings tab
 ```
 
@@ -247,26 +250,66 @@ O **Target Folder** é configurável na aba Settings (default: `Assets/ImportedA
 
 Os modelos `ApprovedAsset` e `AssetCategory` em `Models/ApprovedAsset.cs` espelham o response do servidor (campo `category` é nullable).
 
-## Sync Status Overlay
+## Sync Status
 
-Depois de importar um asset, o tool grava uma entrada em `.pipeline-manifest.json` (na raiz do **Target Folder**) associando o asset local à sua origem no Pipeline Tool. A aba Project passa a mostrar um ícone sobre cada asset rastreado:
+Depois de importar um asset, o tool grava uma entrada em `.pipeline-manifest.json` (na raiz do **Target Folder**) associando o asset local à sua origem no Hopper. O estado de cada entrada sai de três fontes: o **manifesto**, o **disco** e o **feed do servidor** (o que está publicado). A aba Project mostra um ícone sobre cada asset rastreado e sobre as pastas acima dele (o pior estado de dentro):
 
 | Ícone | Estado | Significado |
 |---|---|---|
 | `✓` verde | Synced | O arquivo local bate com a versão **publicada** no servidor |
 | `!` laranja | Outdated | O servidor publicou uma versão mais nova do que a baixada localmente |
 | `M` azul | Modified Locally | O conteúdo do arquivo local mudou desde o download (hash diverge) — provável edição manual fora do pipeline |
+| `×` vermelho | Missing (v0.5) | O manifesto conhece o arquivo, mas ele sumiu do disco. Aparece na pasta mais próxima que ainda existe |
+
+Dois contadores só existem no overlay do Scene View, porque não têm arquivo onde desenhar:
+**new** (publicado no Hopper, fora do manifesto — falta importar) e **unknown** (no manifesto, mas
+este servidor não publica: despublicado, ou importado com o server picker apontando para outro
+ambiente). Um arquivo *unknown* não ganha `✓`.
+
+### Arquivo apagado localmente (v0.5)
+
+**A deleção é só local, de propósito.** O servidor não fica sabendo: o `imported_at` da web é
+histórico ("alguém trouxe essa versão"), e uma máquina com um arquivo apagado e ainda não
+commitado não deve mudar o estado para o time todo. A verdade local é o manifesto + o disco.
+
+- **Detecção:** `PipelineAssetWatcher` (um `AssetPostprocessor`) chama `PipelineSyncStatus.Recompute()`
+  quando algo sob o Target Folder é importado, apagado ou movido. Apagar no Unity vira `×` na hora,
+  sem rede; apagar pelo Explorer aparece quando o Unity percebe (próximo refresh de assets). **A
+  entrada nunca sai sozinha do manifesto** — apagar sem querer é justamente o que queremos acusar.
+- **Reimport** (faixa "N file(s) tracked by Hopper were deleted locally" na aba Assets, ou o botão
+  **Reimport** na linha do Item): baixa de novo **a versão publicada agora, no caminho que o Hopper
+  manda** — não a versão e o caminho que o manifesto lembra, que podem não existir mais (versão
+  apagada no Hopper, título ou categoria trocados). Só um asset que o Hopper não publica mais cai no
+  que o manifesto registrou. Antes do import, **grava um `.meta` mínimo com o GUID original**
+  (`AssetRestorer.WriteAsset`): referências de cena e prefab voltam a valer e a chave do manifesto
+  continua a mesma. Se a versão baixada é mais nova que a apagada, marca como importada no servidor,
+  como qualquer import. As import settings voltam ao padrão — se a deleção ainda não foi commitada,
+  `git checkout` do arquivo e do `.meta` traz tudo de volta. O mesmo `WriteAsset` roda nos dois
+  imports, então um Update sobre arquivo apagado também mantém o GUID.
+- **Glifos:** a fonte do Editor não tem todos os símbolos Unicode — o `⟳` saiu como um botão vazio no
+  overlay e o `✕` corria o mesmo risco. O refresh usa o ícone `Refresh` do Editor
+  (`EditorGUIUtility.IconContent`), e o Missing usa `×` (Latin-1). Símbolo novo na UI: prefira ícone do
+  Editor ou caractere Latin-1.
+- **Forget:** apagou de propósito. As entradas saem do manifesto (commitar), e o asset volta a contar
+  como *new* se continuar publicado.
+- **Onde escrever de volta:** `local_path` (v0.5), gravado no import e atualizado em cada Recompute
+  (acompanha moves). Entradas anteriores sem ele caem no `engine_path` (Item) ou no caminho que o
+  import por tipo usaria hoje (`AssetDownloader.BuildDestPath`, a partir do feed). O primeiro
+  Recompute depois de instalar a v0.5 preenche `local_path` em todas as entradas — um diff único no
+  manifesto do jogo, para commitar.
 
 ### Formato do manifesto
 
-`.pipeline-manifest.json` é um arquivo único, **commitado no repositório do jogo** (visibilidade compartilhada entre o time), chaveado pelo **GUID** do asset — não pelo path. O GUID é gerido pelo próprio Unity via `.meta`; o tool só o lê via `AssetDatabase`, nunca escreve nele, então não há risco de mexer nas configurações de import do asset. Isso também significa que renomear/mover um asset rastreado no Unity não quebra a referência.
+`.pipeline-manifest.json` é um arquivo único, **commitado no repositório do jogo** (visibilidade compartilhada entre o time), chaveado pelo **GUID** do asset — não pelo path. O GUID é gerido pelo próprio Unity via `.meta`; o tool o lê via `AssetDatabase` e só escreve um `.meta` num caso: o Reimport de um arquivo apagado, quando não existe `.meta` nenhum no caminho. Renomear/mover um asset rastreado no Unity não quebra a referência.
 
 ```json
 {
   "entries": [
-    { "guid": "a1b2c3...", "asset_id": "uuid", "version_id": "uuid", "version_number": 3, "task_title": "PROP_Conteiner", "local_hash": "sha1..." },
+    { "guid": "a1b2c3...", "asset_id": "uuid", "version_id": "uuid", "version_number": 3, "task_title": "PROP_Conteiner", "local_hash": "sha1...",
+      "local_path": "Assets/ImportedAssets/Props/PROP_Conteiner/SM_Conteiner.fbx" },
     { "guid": "d4e5f6...", "asset_id": "uuid", "version_id": "uuid", "version_number": 1, "task_title": "SM_PR001_Chair.fbx", "local_hash": "sha1...",
-      "item_id": "uuid", "engine_path": "Props/Industrial/PR001_Chair/SM_PR001_Chair.fbx" }
+      "item_id": "uuid", "engine_path": "Props/Industrial/PR001_Chair/SM_PR001_Chair.fbx",
+      "local_path": "Assets/ImportedAssets/Props/Industrial/PR001_Chair/SM_PR001_Chair.fbx" }
   ]
 }
 ```
@@ -276,18 +319,51 @@ Como é um arquivo único compartilhado, existe risco residual de conflito de me
 > **⚠️ Ícones não estão aparecendo** (registrado em 24/set/2026, antes da migration 005 do web app).
 > O servidor responde certo. Suspeita: o manifesto do `dungeon-delivery` mistura entradas de
 > **produção e de staging** (imports feitos com o server picker em cada um), e o refresh pode estar
-> falhando antes de desenhar. Diagnosticar pelo aviso `[Hopper] Sync status refresh failed` no
-> Console. Enquanto isso, `pipeline-tool/scripts/check-manifest.mjs` confere um manifesto contra o
-> banco de forma objetiva.
+> falhando antes de desenhar. Desde a v0.5 o overlay do Scene View mostra o erro do refresh e conta
+> as entradas *unknown* (as de outro ambiente) — deve bastar para confirmar ou descartar. Enquanto isso,
+> `pipeline-tool/scripts/check-manifest.mjs` confere um manifesto contra o banco de forma objetiva.
 
-### Quando o refresh de sync acontece
+### Quando o estado é calculado
 
-Nunca dentro do callback de desenho (`projectWindowItemOnGUI`, que roda a cada repaint da aba Project) — isso só lê os dicionários já calculados em memória. A chamada de rede (`PipelineSyncStatus.RefreshAsync`) dispara em dois lugares:
+Nunca dentro do callback de desenho (`projectWindowItemOnGUI`, que roda a cada repaint da aba Project) — isso só lê os dicionários já calculados. O `PipelineSyncStatus` tem duas metades:
 
-- Automaticamente quando a Import Window é aberta/reabilitada (`OnEnable`), se `PipelineSettings.AutoRefreshSyncOnStartup` estiver ligado (default: `true`).
-- Manualmente pelo botão **Sync Status** na aba Assets.
+- **`RefreshAsync` (rede):** os mesmos dois feeds de sempre (`/api/assets/approved?include_imported=true`
+  e `/api/items/published?include_imported=true`). O resultado fica em `SessionState`, que sobrevive
+  ao domain reload (todo compile de script) mas não a fechar o Editor, e só vale para o projeto e o
+  servidor de onde veio. Dispara:
+  - ao abrir o Editor (e ao abrir a Import Window), **só se não houver cache** para o projeto atual,
+    e se **Auto-refresh on Editor start** estiver ligado (default: `true`);
+  - pelo botão de refresh do overlay e pelo botão **Sync Status** da janela.
 
-O toggle **Auto-refresh on Editor start**, na aba Settings, desliga o gatilho automático — útil em projetos grandes onde o custo do refresh (ler hash de cada asset rastreado do disco) pode incomodar.
+  Falha não lança: vira `Summary.Error` ("Offline — could not reach Hopper", "Session expired — sign
+  in again"), e os contadores anteriores continuam valendo.
+- **`Recompute` (disco + manifesto, sem rede):** depois de cada refresh, ao abrir o Editor, depois de
+  cada import/Reimport/Forget e sempre que o watcher vê mudança no Target Folder. O hash só é relido
+  quando tamanho ou mtime do arquivo mudaram. Dispara o evento `Changed`, que a janela e o overlay escutam.
+
+O manifesto só é relido do disco quando não há mudança pendente em memória (`HasUnsavedChanges`):
+um import grava entradas com `save: false` entre um download e outro, e um Recompute no meio não pode
+jogá-las fora.
+
+### Overlay no Scene View (v0.5)
+
+`HopperSyncOverlay` — uma linha num canto do Scene View: **sapinho** à esquerda, **bolinha** com o pior
+estado, **resumo** e o botão de **refresh** (o ícone `Refresh` do próprio Editor).
+
+```
+[🐸] ● All synced                          [↻]
+[🐸] ● 2 to update · 1 missing · 3 new     [↻]
+```
+
+- Bolinha: vermelha (missing) › azul (modified) › laranja (to update / new) › verde (tudo em dia,
+  conferido contra o servidor) › cinza (não conferido, erro, unknown, deslogado).
+- O refresh só reconfere a sincronia — **nunca importa**. Clicar no texto abre a Import Window. O tooltip
+  lista os arquivos apagados (até 8), o horário da última conferência e o erro, se houver.
+- Deslogado ou sem projeto: "Sign in to Hopper" / "Select a project in Hopper", com o refresh desligado.
+- Nasce no canto de baixo à esquerda (`DockZone.LeftColumn` + `DockPosition.Bottom`) a partir da
+  2022.3; antes disso esses campos do `OverlayAttribute` não existem, e ele abre flutuando — encaixe
+  uma vez, o Unity lembra. Liga e desliga pelo menu de overlays do Scene View (tecla de acento grave).
+- O sapinho é a marca fixa da barra; a mensagem de erro fica neutra, sem pose (regra do `BRAND.md`).
 
 ## Releases
 
@@ -295,18 +371,19 @@ Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
 
 | Versão | Data | O que muda |
 |---|---|---|
+| `v0.5.0` | 29/set/2026 | Sincronia de verdade: estado **Missing** (`×`) para arquivo apagado localmente, detectado na hora pelo `PipelineAssetWatcher`; **Reimport** (versão publicada, com o GUID original) e **Forget**; overlay no Scene View com sapinho, resumo e refresh; cache do feed em `SessionState` (os ícones sobrevivem ao compile sem a janela aberta); erro do refresh visível; `local_path` no manifesto. Só local — nenhuma mudança no web app |
 | `v0.4.0` | 28/set/2026 | Visual novo da janela: lista em card com thumbnail, badge colorido por tipo e um botão por Item — **Import** (nada local), **Update** (versão nova, subtítulo `v2 → v3`) ou "✓ Imported" (os em dia ficam num foldout). Thumbnail via `/api/assets/{id}/thumbnail`; contra um servidor sem `thumbnail_url`, só mostra o placeholder |
 | `v0.3.0` | 28/set/2026 | Import por Item com `engine_path` do servidor, mover de volta com confirmação, `PathSafety` nos dois fluxos, commit hash real, token renovado antes do download, labels. Precisa do web com a Fase 4 (`/api/items/published`); contra um servidor sem ela, a lista de Itens só fica vazia |
 | `v0.2.0` | 25/set/2026 | Pastas `Textures/` e `Materials/`. Publicada **antes** do backend servir texturas, para que nenhuma textura fosse importada em `Other/` e ficasse órfã na atualização |
 | `v0.1.0` | — | Primeira versão |
 
 ```bash
-# Edite package.json: "version": "0.4.0"
+# Edite package.json: "version": "0.5.0"
 git add package.json package.json.meta
-git commit -m "chore: bump version to 0.4.0"
+git commit -m "chore: bump version to 0.5.0"
 git push
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 ## Permissões
