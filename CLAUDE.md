@@ -12,7 +12,7 @@ Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cros
 
 ```
 name:    com.antigravity.pipeline-tool
-version: 0.5.0
+version: 0.6.0
 unity:   2021.3+
 repo:    https://github.com/VinniHashirama/pipeline-tool-unity
 ```
@@ -26,14 +26,14 @@ Editor/
     ├── Models/
     │   ├── ApprovedAsset.cs        — mirrors GET /api/assets/approved response (inclui AssetCategory)
     │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
-    │   ├── PublishedItem.cs        — mirrors GET /api/items/published e POST /api/items/{id}/mark-imported (v0.3)
+    │   ├── PublishedItem.cs        — mirrors GET /api/items/published e POST /api/items/{id}/mark-imported (v0.3; `AnimationInfo` v0.6)
     │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse, UserPermissions
     ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag, permissões)
     ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported, GetPublishedItems, MarkItemImported, Download, DownloadTexture (thumbnail, v0.4)
     ├── HopperStyles.cs             — estilos da janela (v0.4): card escuro, badge colorido por tipo, placeholder de thumbnail, nota âmbar — criados sob demanda, recriados após domain reload
     ├── PathSafety.cs               — TODO caminho escrito passa aqui: relativo, sem `..`, dentro do Target Folder, que fica dentro de Assets/
     ├── AssetDownloader.cs          — import por tipo: hierarquia local (TypePlural/Category?/AssetTitle/) + manifesto
-    ├── ItemImporter.cs             — import por Item (v0.3): engine_path do servidor, plano De/Para e MoveAsset, labels
+    ├── ItemImporter.cs             — import por Item (v0.3): engine_path do servidor, plano De/Para e MoveAsset, labels; `AnimationImport` (v0.6): Humanoid/Generic, loop, nome do clip e avatar do SK_, salvos no importer
     ├── GitInfo.cs                  — `git rev-parse HEAD` do projeto, enviado como commit_hash
     ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash (+ item_id/engine_path, local_path)
     ├── PipelineSyncStatus.cs       — fonte única do estado de sync: refresh contra o servidor (cache em SessionState) + Recompute local (disco + manifesto) + ícones na aba Project

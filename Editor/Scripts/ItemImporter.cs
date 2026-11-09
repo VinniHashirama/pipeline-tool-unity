@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEditor;
+using Avatar = UnityEngine.Avatar;
 using AntiGravity.PipelineTool.Editor.Models;
 
 namespace AntiGravity.PipelineTool.Editor
@@ -97,7 +98,10 @@ namespace AntiGravity.PipelineTool.Editor
         /// </summary>
         public static async Task<ItemImportResult> ImportAsync(PublishedItem item, Action<string> onStatus)
         {
-            var files = item.files ?? Array.Empty<ItemFile>();
+            // The rig first: Humanoid clips copy the avatar of the SK_ already imported (v0.6).
+            var files = (item.files ?? Array.Empty<ItemFile>())
+                .OrderBy(f => f.HasAnimation && !f.animation.is_clip ? 0 : 1)
+                .ToArray();
             // Every path is checked before the first download: all or nothing.
             var destinations = files.ToDictionary(f => f.asset_id, f => PathSafety.Combine(PipelineSettings.ImportTargetPath, f.engine_path));
 
@@ -116,6 +120,12 @@ namespace AntiGravity.PipelineTool.Editor
                 // A tracked file deleted from here comes back with its old GUID,
                 // so scene and prefab references to it work again.
                 var guid = AssetRestorer.WriteAsset(dest, data, AssetRestorer.GuidToKeep(file.asset_id, dest));
+                if (file.HasAnimation)
+                {
+                    var rig = files.FirstOrDefault(f => f.HasAnimation && !f.animation.is_clip);
+                    var note = AnimationImport.Apply(dest, file.animation, rig != null ? destinations[rig.asset_id] : null);
+                    if (!string.IsNullOrEmpty(note)) onStatus?.Invoke(note);
+                }
                 SetLabels(dest, item);
                 // Entries of this asset left at another path (legacy orphans) are dropped:
                 // the file the manifest tracks is the one at engine_path.
@@ -187,6 +197,66 @@ namespace AntiGravity.PipelineTool.Editor
                 AssetDatabase.DeleteAsset(folder);
                 folder = Path.GetDirectoryName(folder)?.Replace('\\', '/');
             }
+        }
+    }
+
+    /// <summary>
+    /// Import settings of rigs and animation clips (v0.6), from what Hopper says:
+    /// Humanoid or Generic, the clip with the action's name and its loop, and — for
+    /// Humanoid clips — the avatar of the Item's SK_. Written to the importer and
+    /// saved (SaveAndReimport), so they live in the .meta and survive any reimport
+    /// on any machine. Only FBX/glTF models; anything else is left alone.
+    /// </summary>
+    internal static class AnimationImport
+    {
+        /// <returns>A note for the status line when something could not be applied, else null.</returns>
+        public static string Apply(string path, AnimationInfo info, string rigPath)
+        {
+            if (!(AssetImporter.GetAtPath(path) is ModelImporter importer)) return null;
+            var humanoid = info.rig_type == "humanoid";
+            importer.animationType = humanoid ? ModelImporterAnimationType.Human : ModelImporterAnimationType.Generic;
+            importer.importAnimation = info.is_clip;
+            string note = null;
+
+            if (info.is_clip && humanoid)
+            {
+                // The clip retargets through the rig's avatar: the same bone mapping as the character.
+                var avatar = string.IsNullOrEmpty(rigPath)
+                    ? null
+                    : AssetDatabase.LoadAllAssetsAtPath(rigPath).OfType<Avatar>().FirstOrDefault(a => a.isHuman);
+                if (avatar != null)
+                {
+                    importer.avatarSetup = ModelImporterAvatarSetup.CopyFromOther;
+                    importer.sourceAvatar = avatar;
+                }
+                else
+                {
+                    importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+                    note = $"{Path.GetFileName(path)}: no Humanoid avatar from the rig (SK_) — avatar created from the clip itself.";
+                }
+            }
+
+            // Saves the model settings first: the clip list depends on them.
+            importer.SaveAndReimport();
+
+            if (info.is_clip)
+            {
+                var clips = importer.clipAnimations;
+                if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
+                if (clips != null && clips.Length > 0)
+                {
+                    foreach (var clip in clips)
+                    {
+                        clip.loopTime = info.loop;
+                        clip.loopPose = info.loop && humanoid;
+                    }
+                    // One take: named after the action (Walk), as Hopper shows it.
+                    if (clips.Length == 1 && !string.IsNullOrEmpty(info.clip_name)) clips[0].name = info.clip_name;
+                    importer.clipAnimations = clips;
+                    importer.SaveAndReimport();
+                }
+            }
+            return note;
         }
     }
 }

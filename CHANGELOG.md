@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0] — 2026-11-09
+
+### Added
+- Import de animação (projetos por Item, Hopper com o feed v0.6): os arquivos de rigging e animation
+  chegam com `animation` { rig_type, fps, is_clip, loop, clip_name, frames } e o import é configurado
+  sozinho — **Humanoid** ou **Generic** (do projeto, ou o do Item), clip com o nome da ação e o loop
+  que o Hopper leu do arquivo. Clip Humanoid usa o avatar do SK_ do Item (importado antes, no mesmo
+  Import); sem ele, cria o avatar do próprio clip e avisa na linha de status.
+- As configurações vão para o importer e são salvas (`SaveAndReimport`): ficam no `.meta` e valem em
+  qualquer máquina e em qualquer reimport.
+
+### Notes
+- Só vale para arquivo baixado de novo (Import/Update). Trocar o tipo de rig no Hopper não reconfigura
+  um arquivo que já está em dia.
+- Servidor antigo (sem o campo) importa como antes.
+
 ## [0.4.0] — 2026-09-28
 
 ### Changed

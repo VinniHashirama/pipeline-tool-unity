@@ -53,6 +53,27 @@ namespace AntiGravity.PipelineTool.Editor.Models
         public string kind;
         public string status;        // approved | imported
         public string uploaded_at;
+        // v0.6 — only on rigging and animation files (servers before it omit it). JsonUtility
+        // fills an absent object with defaults, so "present" means rig_type is not empty.
+        public AnimationInfo animation;
+
+        public bool HasAnimation => animation != null && !string.IsNullOrEmpty(animation.rig_type);
+    }
+
+    /// <summary>
+    /// How to import a rig or an animation clip (v0.6): Humanoid or Generic, loop,
+    /// clip name. The values come from Hopper (project settings, the Item's override
+    /// and what the upload read from the file).
+    /// </summary>
+    [Serializable]
+    public class AnimationInfo
+    {
+        public string rig_type;   // humanoid | generic
+        public int fps;
+        public bool is_clip;      // true = animation file; false = the rig (SK_)
+        public bool loop;
+        public string clip_name;  // the action: Walk, Idle…
+        public int frames;
     }
 
     /// <summary>Response of POST /api/items/{id}/mark-imported.</summary>
