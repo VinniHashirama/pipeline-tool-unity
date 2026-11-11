@@ -20,7 +20,7 @@ Abra **Window > Package Manager**, clique no botão **+** no canto superior esqu
 Escolha **"Add package from git URL…"** e cole:
 
 ```
-https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0
+https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.6.0
 ```
 
 Para fixar em uma versão específica, adicione `#v<semver>` ao final. Omita a tag para usar sempre o latest `main` (apenas em dev).
@@ -34,7 +34,7 @@ Escolha **"Add package from disk…"** e navegue até o `package.json` dentro da
 ```json
 {
   "dependencies": {
-    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.2.0"
+    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.6.0"
   }
 }
 ```
@@ -84,11 +84,12 @@ Todas as configurações ficam no `EditorPrefs` — por usuário, por máquina. 
 
 ## Uso
 
-1. Na aba **Assets**, clique em **Refresh** para buscar assets com status `approved`.
-2. Clique em **Import** em qualquer linha para:
-   - Baixar o arquivo para a pasta configurada
-   - Executar `AssetDatabase.ImportAsset` (Unity importa automaticamente)
-   - Chamar `PATCH /api/assets/{id}/mark-imported` → task vira `imported` e notificação Slack é enviada
+O passo a passo para quem usa (Import, Update, Move, Missing, Reimport, Forget e o overlay
+**Hopper Sync**) está na aba **Docs** do Hopper: https://pipeline-tool-web.vercel.app/dashboard/docs#unity
+
+Em resumo: **Refresh** lista os Itens aprovados do projeto; **Import** traz o Item para
+`[Target Folder]/Tipo/Categoria/Item/` e registra o commit na versão; **Update** troca pela versão
+publicada mais nova no mesmo caminho, preservando o GUID.
 
 ---
 
@@ -113,13 +114,15 @@ O tool usa **JWT Supabase** (email + senha) — as mesmas credenciais da web app
 ```bash
 # Edite "version" em package.json, depois:
 git add package.json package.json.meta
-git commit -m "chore: bump version to 0.2.0"
+git commit -m "chore: bump version to 0.7.0"
 git push
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
-No Unity, atualize `manifest.json` para `#v0.2.0` — o Package Manager baixa a nova versão automaticamente.
+No Unity, atualize `manifest.json` para a tag nova (ex.: `#v0.7.0`) — o Package Manager baixa a nova versão automaticamente.
+
+A cada tag, atualize também `docs/plugins.json` e `docs/novidades.md` no repositório web (aba Docs) e as linhas de instalação deste README.
 
 ---
 
