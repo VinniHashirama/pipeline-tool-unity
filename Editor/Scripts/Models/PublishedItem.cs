@@ -74,6 +74,43 @@ namespace AntiGravity.PipelineTool.Editor.Models
         public bool loop;
         public string clip_name;  // the action: Walk, Idle…
         public int frames;
+        // v0.7 — the file's clip map: which clips Unity creates from it (one action,
+        // a pack with one clip per take, or ranges cut from one take). Servers before
+        // 12/nov omit it; JsonUtility then leaves an empty (or null) array.
+        public EngineClip[] clips;
+
+        public bool HasClipMap => is_clip && clips != null && clips.Length > 0;
+
+        /// <summary>
+        /// What the clip map says, as one string. Stored in the manifest at import: a map
+        /// edited in Hopper (same version) shows as Update and re-applies without downloading.
+        /// </summary>
+        public string ClipSignature()
+        {
+            if (!HasClipMap) return "";
+            var parts = new string[clips.Length];
+            for (var i = 0; i < clips.Length; i++)
+            {
+                var c = clips[i];
+                parts[i] = $"{c.name}|{c.take}|{c.take_index}|{c.first_frame}|{c.last_frame}|{(c.loop ? 1 : 0)}";
+            }
+            return $"{rig_type}|{fps}#" + string.Join(";", parts);
+        }
+    }
+
+    /// <summary>
+    /// One clip of the map (v0.7). Frames are counted at the Hopper project's fps,
+    /// from the start of the take, both ends included. last_frame -1 = the end of the take.
+    /// </summary>
+    [Serializable]
+    public class EngineClip
+    {
+        public string name;        // the clip name in Unity (Jump_Loop)
+        public string take;        // the take in the FBX (Take 001, Jump)
+        public int take_index;     // the take's position in the file, if the name does not match
+        public int first_frame;
+        public int last_frame;
+        public bool loop;
     }
 
     /// <summary>Response of POST /api/items/{id}/mark-imported.</summary>

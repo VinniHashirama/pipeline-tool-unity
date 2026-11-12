@@ -105,13 +105,27 @@ namespace AntiGravity.PipelineTool.Editor
             // Every path is checked before the first download: all or nothing.
             var destinations = files.ToDictionary(f => f.asset_id, f => PathSafety.Combine(PipelineSettings.ImportTargetPath, f.engine_path));
 
+            var rigFile = files.FirstOrDefault(f => f.HasAnimation && !f.animation.is_clip);
+            var rigPath = rigFile != null ? destinations[rigFile.asset_id] : null;
+
             foreach (var file in files)
             {
                 var dest = destinations[file.asset_id];
+                var signature = file.HasAnimation ? file.animation.ClipSignature() : "";
                 var known = PipelineManifest.FindByAssetId(file.asset_id)
                     .FirstOrDefault(e => PathSafety.SamePath(AssetDatabase.GUIDToAssetPath(e.guid), dest));
                 if (known != null && known.version_id == file.version_id && File.Exists(dest))
-                    continue; // already here, same version
+                {
+                    if (signature == "" || known.clip_signature == signature)
+                        continue; // already here, same version, same clips
+                    // Same file, clip map edited in Hopper (v0.7): only the importer changes, no download.
+                    onStatus?.Invoke($"Applying the clip map of {file.file_name}…");
+                    var mapNote = AnimationImport.Apply(dest, file.animation, rigPath);
+                    if (!string.IsNullOrEmpty(mapNote)) onStatus?.Invoke(mapNote);
+                    known.clip_signature = signature;
+                    PipelineManifest.Set(known.guid, known, save: false);
+                    continue;
+                }
 
                 onStatus?.Invoke($"Downloading {file.file_name}…");
                 var data = await PipelineApiClient.DownloadAsync(file.asset_id, file.version_id,
@@ -122,8 +136,7 @@ namespace AntiGravity.PipelineTool.Editor
                 var guid = AssetRestorer.WriteAsset(dest, data, AssetRestorer.GuidToKeep(file.asset_id, dest));
                 if (file.HasAnimation)
                 {
-                    var rig = files.FirstOrDefault(f => f.HasAnimation && !f.animation.is_clip);
-                    var note = AnimationImport.Apply(dest, file.animation, rig != null ? destinations[rig.asset_id] : null);
+                    var note = AnimationImport.Apply(dest, file.animation, rigPath);
                     if (!string.IsNullOrEmpty(note)) onStatus?.Invoke(note);
                 }
                 SetLabels(dest, item);
@@ -142,6 +155,7 @@ namespace AntiGravity.PipelineTool.Editor
                     item_id        = item.id,
                     engine_path    = file.engine_path,
                     local_path     = dest,
+                    clip_signature = signature,
                 }, save: false);
             }
             PipelineManifest.Save();
@@ -241,22 +255,81 @@ namespace AntiGravity.PipelineTool.Editor
 
             if (info.is_clip)
             {
-                var clips = importer.clipAnimations;
-                if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
+                // v0.7: the clip map decides the clips. Without one (server before 12/nov), v0.6 behaviour.
+                string mapNote = null;
+                var clips = info.HasClipMap ? ClipsFromMap(importer, info, humanoid, out mapNote) : null;
+                note = Join(note, mapNote);
+                if (clips == null)
+                {
+                    clips = importer.clipAnimations;
+                    if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
+                    if (clips != null)
+                    {
+                        foreach (var clip in clips)
+                        {
+                            clip.loopTime = info.loop;
+                            clip.loopPose = info.loop && humanoid;
+                        }
+                        // One take: named after the action (Walk), as Hopper shows it.
+                        if (clips.Length == 1 && !string.IsNullOrEmpty(info.clip_name)) clips[0].name = info.clip_name;
+                    }
+                }
                 if (clips != null && clips.Length > 0)
                 {
-                    foreach (var clip in clips)
-                    {
-                        clip.loopTime = info.loop;
-                        clip.loopPose = info.loop && humanoid;
-                    }
-                    // One take: named after the action (Walk), as Hopper shows it.
-                    if (clips.Length == 1 && !string.IsNullOrEmpty(info.clip_name)) clips[0].name = info.clip_name;
                     importer.clipAnimations = clips;
                     importer.SaveAndReimport();
                 }
             }
             return note;
         }
+
+        /// <summary>
+        /// One importer clip per row of the map: the take (by name, else by position),
+        /// the frames, the loop and the name. Hopper counts frames at the project's fps
+        /// from the start of the take; the importer counts at the file's sample rate from
+        /// the take's own start, so the frames are converted. Null when no take matched.
+        /// </summary>
+        private static ModelImporterClipAnimation[] ClipsFromMap(ModelImporter importer, AnimationInfo info, bool humanoid, out string note)
+        {
+            note = null;
+            var takes = importer.importedTakeInfos;
+            if (takes == null || takes.Length == 0) return null;
+            var fps = info.fps > 0 ? info.fps : 30;
+            var result = new List<ModelImporterClipAnimation>();
+            var missing = new List<string>();
+
+            foreach (var c in info.clips)
+            {
+                var index = Array.FindIndex(takes, t => t.name == c.take);
+                if (index < 0 && c.take_index >= 0 && c.take_index < takes.Length) index = c.take_index;
+                if (index < 0) { missing.Add(c.take); continue; }
+
+                var take = takes[index];
+                var rate = take.sampleRate > 0 ? take.sampleRate : fps;
+                var takeFirst = take.startTime * rate;
+                var takeLast = take.stopTime * rate;
+                var first = takeFirst + c.first_frame * rate / fps;
+                var last = c.last_frame < 0 ? takeLast : takeFirst + c.last_frame * rate / fps;
+                first = Math.Max(takeFirst, Math.Min(first, takeLast));
+                last = Math.Max(first, Math.Min(last, takeLast));
+
+                result.Add(new ModelImporterClipAnimation
+                {
+                    name       = string.IsNullOrEmpty(c.name) ? take.defaultClipName : c.name,
+                    takeName   = take.name,
+                    firstFrame = first,
+                    lastFrame  = last,
+                    loopTime   = c.loop,
+                    loopPose   = c.loop && humanoid,
+                });
+            }
+
+            if (missing.Count > 0)
+                note = $"{Path.GetFileName(importer.assetPath)}: take(s) not found in the FBX: {string.Join(", ", missing.Distinct())}.";
+            return result.Count > 0 ? result.ToArray() : null;
+        }
+
+        private static string Join(string a, string b) =>
+            string.IsNullOrEmpty(a) ? b : string.IsNullOrEmpty(b) ? a : $"{a} {b}";
     }
 }

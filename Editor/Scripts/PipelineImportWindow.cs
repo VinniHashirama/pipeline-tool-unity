@@ -1006,7 +1006,15 @@ namespace AntiGravity.PipelineTool.Editor
                 }
 
                 var behind = entries.Count > 0 && file.version_number > local;
-                if (behind || file.status != "imported")
+                // v0.7: the clip map was edited in Hopper (same version) — Update re-applies it, no download.
+                var signature = file.HasAnimation ? file.animation.ClipSignature() : "";
+                var mapChanged = !behind && signature != "" && entries.Count > 0
+                    && !entries.Exists(e => e.clip_signature == signature);
+                if (mapChanged)
+                {
+                    changes.Add($"{file.file_name} clip map");
+                }
+                else if (behind || file.status != "imported")
                 {
                     changes.Add(entries.Count == 0
                         ? $"{file.file_name} (new)"
@@ -1014,7 +1022,7 @@ namespace AntiGravity.PipelineTool.Editor
                             ? $"{file.file_name} v{file.version_number}"
                             : $"{file.file_name} v{local} → v{file.version_number}");
                 }
-                var mark = entries.Count > 0 && !behind ? "✓" : "•";
+                var mark = entries.Count > 0 && !behind && !mapChanged ? "✓" : "•";
                 lines.Add($"{mark} {file.file_name}  v{file.version_number}  ·  {FormatBytes(file.file_size_bytes)}");
             }
 

@@ -45,6 +45,7 @@ namespace AntiGravity.PipelineTool.Editor
             public int    version_number;
             public string file_name;
             public string path; // where an import would write it, when the path is valid
+            public string clip_signature; // v0.7 — the clip map of an animation file, else empty
         }
 
         [Serializable]
@@ -129,6 +130,7 @@ namespace AntiGravity.PipelineTool.Editor
                         asset_id = file.asset_id, version_id = file.version_id, version_number = file.version_number,
                         file_name = file.file_name,
                         path = TryPath(() => PathSafety.Combine(PipelineSettings.ImportTargetPath, file.engine_path)),
+                        clip_signature = file.HasAnimation ? file.animation.ClipSignature() : "",
                     });
                 }
 
@@ -204,7 +206,9 @@ namespace AntiGravity.PipelineTool.Editor
 
                 var modified = HashOf(path) != entry.local_hash;
                 published.TryGetValue(entry.asset_id, out var latest);
-                var outdated = latest != null && latest.version_number > entry.version_number;
+                var outdated = latest != null && (latest.version_number > entry.version_number
+                    // v0.7: same version, clip map edited in Hopper.
+                    || (!string.IsNullOrEmpty(latest.clip_signature) && latest.clip_signature != (entry.clip_signature ?? "")));
 
                 if (feed != null && latest == null) summary.Unknown++;
 

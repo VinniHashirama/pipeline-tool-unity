@@ -25,6 +25,9 @@ namespace AntiGravity.PipelineTool.Editor
         // v0.5 — project-relative path the file was written to. Once the file is
         // deleted its GUID resolves to nothing; this is where Reimport falls back to.
         public string local_path;
+        // v0.7 — the clip map applied at import (AnimationInfo.ClipSignature). Empty for
+        // everything else and for animations imported before v0.7.
+        public string clip_signature;
     }
 
     [Serializable]

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.0] — 2026-11-12
+
+### Added
+- Mapa de clipes (Hopper de 12/nov): cada arquivo de animação chega com `animation.clips`
+  [{ name, take, take_index, first_frame, last_frame, loop }] e o import cria **um clipe do importer por
+  linha** — take (pelo nome, ou pela posição se o nome não bater), primeiro e último frame, loop e nome.
+  Resolve o pacote (Locomotion com Idle, Walk e Run num FBX) e a ação cortada (Jump_In, Jump_Loop e
+  Jump_Out do mesmo take). Os frames do Hopper (fps do projeto, contados do começo do take) são convertidos
+  para o sample rate e o começo do take no FBX; `last_frame` -1 = até o fim do take.
+- Mapa editado no Hopper sem versão nova: o manifesto guarda a assinatura do mapa (`clip_signature`), a
+  janela mostra **Update** ("… clip map") e o overlay conta como "to update". O Update só reaplica o importer,
+  sem baixar o arquivo de novo.
+
+### Changed
+- O loop de cada clipe vem do mapa: acabou o loop do primeiro take valendo para todos (v0.6).
+
+### Notes
+- Animações importadas pela v0.6 aparecem uma vez como **Update** ("clip map"): é o mapa sendo aplicado.
+- Take do mapa que não existe no FBX vira aviso na linha de status, e o clipe é pulado.
+- Servidor antigo (sem `clips`) importa como a v0.6.
+
 ## [0.6.0] — 2026-11-09
 
 ### Added
