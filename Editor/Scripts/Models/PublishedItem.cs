@@ -78,24 +78,58 @@ namespace AntiGravity.PipelineTool.Editor.Models
         // a pack with one clip per take, or ranges cut from one take). Servers before
         // 12/nov omit it; JsonUtility then leaves an empty (or null) array.
         public EngineClip[] clips;
+        // v0.9 — the blendshape map: curves of the clip that go to another shape of the rig
+        // (the clip animates Expressions.blink, the SK_ has the blink in Expressions.blinkb),
+        // or are dropped (to = ""). Only rows where from != to. Absent or empty = nothing changes.
+        public ShapeMapRow[] shape_map;
 
         public bool HasClipMap => is_clip && clips != null && clips.Length > 0;
+        public bool HasShapeMap => is_clip && shape_map != null && shape_map.Length > 0;
 
         /// <summary>
-        /// What the clip map says, as one string. Stored in the manifest at import: a map
-        /// edited in Hopper (same version) shows as Update and re-applies without downloading.
+        /// What the clip map (v0.7) and the blendshape map (v0.9) say, as one string. Stored in
+        /// the manifest at import: a map edited in Hopper (same version) shows as Update and
+        /// re-applies without downloading. Without a blendshape map the string is exactly the
+        /// v0.7 one, so files imported by v0.7/v0.8 do not all turn into Update.
         /// </summary>
         public string ClipSignature()
         {
-            if (!HasClipMap) return "";
-            var parts = new string[clips.Length];
-            for (var i = 0; i < clips.Length; i++)
+            var signature = "";
+            if (HasClipMap)
             {
-                var c = clips[i];
-                parts[i] = $"{c.name}|{c.take}|{c.take_index}|{c.first_frame}|{c.last_frame}|{(c.loop ? 1 : 0)}";
+                var parts = new string[clips.Length];
+                for (var i = 0; i < clips.Length; i++)
+                {
+                    var c = clips[i];
+                    parts[i] = $"{c.name}|{c.take}|{c.take_index}|{c.first_frame}|{c.last_frame}|{(c.loop ? 1 : 0)}";
+                }
+                signature = $"{rig_type}|{fps}#" + string.Join(";", parts);
             }
-            return $"{rig_type}|{fps}#" + string.Join(";", parts);
+            if (HasShapeMap)
+            {
+                var rows = new string[shape_map.Length];
+                for (var i = 0; i < shape_map.Length; i++)
+                {
+                    var r = shape_map[i];
+                    rows[i] = $"{r.mesh}|{r.from}|{r.to}";
+                }
+                signature += "#shapes:" + string.Join(";", rows);
+            }
+            return signature;
         }
+    }
+
+    /// <summary>
+    /// One row of the blendshape map (v0.9). mesh is the mesh name in the FBX (in Unity, the
+    /// GameObject of the SkinnedMeshRenderer: the last segment of the binding path); from and
+    /// to are the shape names as Hopper reads them (Expressions.blink). to = "" drops the curve.
+    /// </summary>
+    [Serializable]
+    public class ShapeMapRow
+    {
+        public string mesh = "";
+        public string from = "";
+        public string to = "";
     }
 
     /// <summary>

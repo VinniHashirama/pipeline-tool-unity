@@ -232,6 +232,12 @@ namespace AntiGravity.PipelineTool.Editor
             importer.importAnimation = info.is_clip;
             string note = null;
 
+            // v0.9: the blendshape map goes to the importer's userData (saved in the .meta), where
+            // ShapeMapPostprocessor reads it on this import and on any reimport after. An empty map
+            // clears ours, so a map emptied in Hopper stops applying.
+            if (info.is_clip)
+                note = Join(note, ShapeMapStore.Write(importer, info.shape_map));
+
             if (info.is_clip && humanoid)
             {
                 // The clip retargets through the rig's avatar: the same bone mapping as the character.
