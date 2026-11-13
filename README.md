@@ -20,7 +20,7 @@ Abra **Window > Package Manager**, clique no botão **+** no canto superior esqu
 Escolha **"Add package from git URL…"** e cole:
 
 ```
-https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.8.0
+https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.9.0
 ```
 
 Para fixar em uma versão específica, adicione `#v<semver>` ao final. Omita a tag para usar sempre o latest `main` (apenas em dev).
@@ -34,7 +34,7 @@ Escolha **"Add package from disk…"** e navegue até o `package.json` dentro da
 ```json
 {
   "dependencies": {
-    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.8.0"
+    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.9.0"
   }
 }
 ```
@@ -90,6 +90,15 @@ Em resumo: **Refresh** lista os Itens aprovados do projeto; **Import** traz o It
 `[Target Folder]/Tipo/Categoria/Item/` e registra o commit na versão; **Update** troca pela versão
 publicada mais nova no mesmo caminho, preservando o GUID.
 
+### Mapa de blendshapes (v0.9)
+
+Quando o rig e a animação não concordam no nome de um blendshape (o SK_ do Billie tem a piscada em
+`Expressions.blinkb`, a animação anima `Expressions.blink`), o mapa de blendshapes do arquivo no Hopper diz para
+onde cada curva vai — ou que ela sai do clipe. O Import aplica sozinho, e o mapa fica no `userData` do importer
+(no `.meta`), então um reimport manual continua valendo. Editar o mapa no Hopper faz o arquivo aparecer como
+**Update**, que reaplica sem baixar. Precisa de `#v0.9.0` no `Packages/manifest.json` do jogo; versões anteriores
+ignoram o mapa.
+
 ---
 
 ## Autenticação
@@ -113,13 +122,13 @@ O tool usa **JWT Supabase** (email + senha) — as mesmas credenciais da web app
 ```bash
 # Edite "version" em package.json, depois:
 git add package.json package.json.meta
-git commit -m "chore: bump version to 0.8.0"
+git commit -m "chore: bump version to 0.9.0"
 git push
-git tag v0.8.0
-git push origin v0.8.0
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
-No Unity, atualize `manifest.json` para a tag nova (ex.: `#v0.8.0`) — o Package Manager baixa a nova versão automaticamente.
+No Unity, atualize `manifest.json` para a tag nova (ex.: `#v0.9.0`) — o Package Manager baixa a nova versão automaticamente.
 
 A cada tag, atualize também `docs/plugins.json` e `docs/novidades.md` no repositório web (aba Docs) e as linhas de instalação deste README.
 
@@ -136,11 +145,13 @@ com.antigravity.pipeline-tool/
     └── Scripts/
         ├── Models/
         │   ├── ApprovedAsset.cs     — response shape de GET /api/assets/approved
+        │   ├── PublishedItem.cs     — feed por Item (animation, clips, shape_map)
         │   ├── AuthModels.cs        — LoginRequest, AuthResponse, ProjectInfo e afins
         │   └── ImportResult.cs      — response shape de PATCH /mark-imported
         ├── PipelineSettings.cs      — EditorPrefs: sessão, permissões, override de dev; repassa projeto e pasta
         ├── HopperProjectSettings.cs — ProjectSettings/HopperSettings.json: projeto e pasta, no Git
         ├── PipelineApiClient.cs     — chamadas HTTP assíncronas (login, refresh, projetos, assets)
+        ├── ShapeMap.cs              — mapa de blendshapes: userData do importer + AssetPostprocessor (v0.9)
         ├── AssetDownloader.cs       — download via proxy + AssetDatabase refresh
         └── PipelineImportWindow.cs  — EditorWindow: login, aba Assets, aba Settings
 ```

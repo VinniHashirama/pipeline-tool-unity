@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.9.0] — 2026-11-13
+
+### Added
+- **Mapa de blendshapes** (Hopper com `animation.shape_map`): cada arquivo de animação pode trazer
+  [{ mesh, from, to }] — a curva de um blendshape do clipe vai para outro shape do rig, ou sai do clipe
+  (`to` vazio). Caso do Billie: o SK_ tem `Expressions.blink` vazio e a piscada em `Expressions.blinkb`; a
+  animação anima `blink` e o mapa leva a curva para `blinkb`.
+- O mapa é aplicado no import do modelo (`ShapeMapPostprocessor`, em `OnPostprocessAnimation`) e fica guardado no
+  `userData` do importer (`{"hopper_shape_map":[…]}`, salvo no `.meta`): um reimport manual continua aplicando.
+  Um `userData` em JSON escrito por outra ferramenta mantém as chaves dele; um que não seja JSON fica intocado, e
+  o mapa não é aplicado (aviso na linha de status).
+- O nome do shape casa inteiro (`Expressions.blink`) ou só a parte depois do último ponto (`blink`), e a curva
+  nova usa a mesma forma da original. A malha é o último trecho do caminho da curva; se nenhuma bater, vale o nome
+  do shape em qualquer malha, desde que seja único no clipe.
+- Mapa editado no Hopper sem versão nova vira **Update** e só reaplica o importer, sem baixar (a assinatura do
+  manifesto, `clip_signature`, passa a incluir o mapa de blendshapes).
+
+### Notes
+- Feed sem `shape_map` (ou vazio) gera a mesma assinatura da v0.7/v0.8: atualizar o plugin **não** faz as
+  animações já importadas aparecerem como Update. Só os arquivos que têm mapa no Hopper aparecem uma vez.
+- Se o clipe já anima o shape de destino, a linha é pulada com aviso no Console (nunca sobrescreve uma curva).
+- Cada clipe remapeado deixa um resumo no Console (`[Hopper] … blendshape map — N curve(s) redirected`).
+- Ao instalar, o Unity pode reimportar os modelos do projeto uma vez (um `AssetPostprocessor` novo com callback de
+  modelo); só os que têm o mapa no `userData` mudam.
+
 ## [0.8.0] — 2026-11-13
 
 ### Changed

@@ -12,7 +12,7 @@ Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cros
 
 ```
 name:    com.antigravity.pipeline-tool
-version: 0.8.0
+version: 0.9.0
 unity:   2021.3+
 repo:    https://github.com/VinniHashirama/pipeline-tool-unity
 ```
@@ -35,6 +35,7 @@ Editor/
     ├── PathSafety.cs               — TODO caminho escrito passa aqui: relativo, sem `..`, dentro do Target Folder, que fica dentro de Assets/
     ├── AssetDownloader.cs          — import por tipo: hierarquia local (TypePlural/Category?/AssetTitle/) + manifesto
     ├── ItemImporter.cs             — import por Item (v0.3): engine_path do servidor, plano De/Para e MoveAsset, labels; `AnimationImport` (v0.6): Humanoid/Generic, loop, nome do clip e avatar do SK_, salvos no importer
+    ├── ShapeMap.cs                 — mapa de blendshapes (v0.9): `ShapeMapStore` (userData do ModelImporter, chave `hopper_shape_map`) + `ShapeMapPostprocessor` (OnPostprocessAnimation redireciona/remove curvas `blendShape.*`)
     ├── GitInfo.cs                  — `git rev-parse HEAD` do projeto, enviado como commit_hash
     ├── PipelineManifest.cs         — lê/grava .pipeline-manifest.json (chaveado por GUID) — mapeia asset local → asset_id/version_id/hash (+ item_id/engine_path, local_path)
     ├── PipelineSyncStatus.cs       — fonte única do estado de sync: refresh contra o servidor (cache em SessionState) + Recompute local (disco + manifesto) + ícones na aba Project
@@ -394,6 +395,7 @@ Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
 
 | Versão | Data | O que muda |
 |---|---|---|
+| `v0.9.0` | 13/nov/2026 | Mapa de blendshapes: `animation.shape_map` [{mesh, from, to}] redireciona (ou remove, `to` vazio) curvas de blendshape no import, por `OnPostprocessAnimation`; mapa no `userData` do importer (`.meta`), vale em reimport manual; entra na `clip_signature` só quando não vazio (feed sem mapa não vira Update). A testar no Editor com o Billie |
 | `v0.8.0` | 13/nov/2026 | Projeto e Target Folder em `ProjectSettings/HopperSettings.json` (Git do jogo); servidor fixo em produção, override Local/Custom só em instalação `file:`; confirmação ao trocar; aviso de projeto sem acesso; migração das chaves da v0.7 oferecida, nunca automática. Só local — nenhuma mudança no web app |
 | `v0.5.0` | 29/set/2026 | Sincronia de verdade: estado **Missing** (`×`) para arquivo apagado localmente, detectado na hora pelo `PipelineAssetWatcher`; **Reimport** (versão publicada, com o GUID original) e **Forget**; overlay no Scene View com sapinho, resumo e refresh; cache do feed em `SessionState` (os ícones sobrevivem ao compile sem a janela aberta); erro do refresh visível; `local_path` no manifesto. Só local — nenhuma mudança no web app |
 | `v0.4.0` | 28/set/2026 | Visual novo da janela: lista em card com thumbnail, badge colorido por tipo e um botão por Item — **Import** (nada local), **Update** (versão nova, subtítulo `v2 → v3`) ou "✓ Imported" (os em dia ficam num foldout). Thumbnail via `/api/assets/{id}/thumbnail`; contra um servidor sem `thumbnail_url`, só mostra o placeholder |
