@@ -12,7 +12,7 @@ Part of a two-repo workspace — see the workspace root `CLAUDE.md` for the cros
 
 ```
 name:    com.antigravity.pipeline-tool
-version: 0.6.0
+version: 0.8.0
 unity:   2021.3+
 repo:    https://github.com/VinniHashirama/pipeline-tool-unity
 ```
@@ -28,7 +28,8 @@ Editor/
     │   ├── ImportResult.cs         — mirrors PATCH /mark-imported response
     │   ├── PublishedItem.cs        — mirrors GET /api/items/published e POST /api/items/{id}/mark-imported (v0.3; `AnimationInfo` v0.6)
     │   └── AuthModels.cs           — LoginRequest, AuthResponse, AuthUser, ProjectInfo, ProjectsResponse, UserPermissions
-    ├── PipelineSettings.cs         — EditorPrefs wrapper (API URL, session tokens, project, import path, auto-refresh sync flag, permissões)
+    ├── PipelineSettings.cs         — EditorPrefs (só da máquina): sessão, permissões (com o projeto de origem), auto-refresh, override de servidor de dev; repassa ProjectId/ImportTargetPath do arquivo compartilhado
+    ├── HopperProjectSettings.cs    — ProjectSettings/HopperSettings.json (v0.8, no Git do jogo): project_id, project_name, import_target_path
     ├── PipelineApiClient.cs        — HTTP client: Login, Refresh, GetUserProjects, GetPermissions, GetApprovedAssets, GetProjectAssetsForSync, MarkImported, GetPublishedItems, MarkItemImported, Download, DownloadTexture (thumbnail, v0.4)
     ├── HopperStyles.cs             — estilos da janela (v0.4): card escuro, badge colorido por tipo, placeholder de thumbnail, nota âmbar — criados sob demanda, recriados após domain reload
     ├── PathSafety.cs               — TODO caminho escrito passa aqui: relativo, sem `..`, dentro do Target Folder, que fica dentro de Assets/
@@ -126,29 +127,49 @@ Ao abrir um projeto Unity que referencia este package via `file:`, o Rider cria 
 
 Abra **Hopper > Import Window**. Na primeira abertura, o tool exibe uma tela de login.
 
+### Compartilhado × só da máquina (v0.8)
+
+| Config | Onde | Por quê |
+|---|---|---|
+| Projeto Hopper (`project_id`, `project_name`) | `ProjectSettings/HopperSettings.json` (Git do jogo) | É do jogo, não da pessoa |
+| Target Folder (`import_target_path`) | idem | O manifesto mora nela; tem que ser a mesma para todos |
+| Servidor | constante `ProductionApiUrl` | Ninguém escolhe |
+| Override de servidor (Local/Custom) | `EditorPrefs`, só com `PackageSource.Local` (`file:`) | Teste interno |
+| Tokens, usuário, permissões, auto-refresh, `PipelineApiKey` | `EditorPrefs` | Pessoal ou segredo |
+
+**Por que o `EditorPrefs` não serve para o que é do jogo:** ele é por máquina e **compartilhado por todos os
+projetos Unity dela** (registro do Windows). Até a v0.7 abrir outro jogo herdava projeto e pasta do anterior, e
+cada pessoa do time podia escolher um projeto diferente para o mesmo repo. O server picker aberto a todos foi o
+que misturou produção e staging no manifesto do `dungeon-delivery`.
+
+Regras:
+- **Nada pessoal ou secreto no `HopperSettings.json`.** Só id/nome do projeto e a pasta. Ele vem do Git: a pasta é
+  entrada não confiável e passa por `PathSafety` em cada uso (não no getter).
+- `HopperProjectSettings` relê o arquivo pelo mtime, no máximo a cada 2 s (os getters rodam em repaint): um
+  `git pull` aparece sem reabrir o Editor. A janela não guarda o índice do projeto escolhido — lê do arquivo a cada
+  desenho.
+- Trocar projeto ou pasta abre `DisplayDialog` e termina com `GUIUtility.ExitGUI()` (modal no meio do `OnGUI`
+  desbalanceia o layout).
+- Projeto do arquivo fora da lista da conta → aviso "your account cannot access", dropdown com a entrada
+  "(no access)", **arquivo intacto**. Nunca cair no primeiro da lista.
+- Sem arquivo: Settings oferece as chaves da v0.7 (`PipelineTool.ProjectId/ProjectName/ImportTargetPath`), nunca
+  aplica sozinho — podem ser de outro jogo da máquina. Sem nada a migrar e um projeto só na conta, liga direto.
+- `ClearSession()` não apaga projeto. Permissões guardam `PipelineTool.PermissionsProject`: cache de outro projeto
+  conta como "não carregou" (dois Editors abertos em jogos diferentes).
+- `RefreshAsync` da janela recusa sem projeto: o feed sem `project_id` traz todos os projetos.
+
 ### Tela de Login
 
-| Campo | Descrição |
-|---|---|
-| Server | Dropdown: **Local** (localhost:3000) · **Production** (URL Vercel) · **Custom** (campo livre) |
-| Email | Email da conta no Hopper (mesma usada na web app) |
-| Password | Senha da conta |
-
-O picker de servidor aparece **antes** do login — permite escolher o ambiente sem precisar logar primeiro.
-Após login, o tool busca automaticamente os projetos do usuário e exibe um dropdown na aba Settings.
+E-mail e senha. O servidor aparece como "Production", só leitura. Numa instalação `file:`, um foldout
+"developer override" dá Local/Custom; ativo, uma faixa amarela fica em todas as abas.
 
 ### Aba Settings (após login)
 
-| Campo | Descrição |
+| Bloco | Campos |
 |---|---|
-| Signed in as | Nome do usuário logado + botão **Sign Out** |
-| Server | Mesmo picker da tela de login — alterável também após logar |
-| Project | Dropdown com os projetos do usuário — salva imediatamente ao selecionar |
-| Target Folder | Pasta destino dentro do projeto Unity, ex: `Assets/ImportedAssets` |
-
-**Para atualizar a URL de Production:** edite a constante `ProductionApiUrl` em `PipelineSettings.cs` com a URL real da Vercel após o primeiro deploy.
-
-Settings ficam no `EditorPrefs` — por usuário, por máquina. Nunca commitados.
+| Account | Signed in as + **Sign Out** |
+| This Unity project · shared with the team (Git) | aviso de migração (v0.7), **Hopper Project** (confirmação), **Target Folder** + **Save** (confirmação; avisa se já há manifesto na pasta antiga) |
+| This machine only | Server (ou override de dev), Auto-refresh sync on start |
 
 ## Autenticação
 
@@ -322,6 +343,8 @@ Como é um arquivo único compartilhado, existe risco residual de conflito de me
 > falhando antes de desenhar. Desde a v0.5 o overlay do Scene View mostra o erro do refresh e conta
 > as entradas *unknown* (as de outro ambiente) — deve bastar para confirmar ou descartar. Enquanto isso,
 > `pipeline-tool/scripts/check-manifest.mjs` confere um manifesto contra o banco de forma objetiva.
+> **Desde a v0.8 a causa não se repete:** o servidor é fixo em produção fora da instalação `file:`. As entradas
+> de staging que já estão no manifesto continuam *unknown* até um **Forget**.
 
 ### Quando o estado é calculado
 
@@ -371,6 +394,7 @@ Sempre bump `version` em `package.json` antes de taggear. Use `v<semver>`.
 
 | Versão | Data | O que muda |
 |---|---|---|
+| `v0.8.0` | 13/nov/2026 | Projeto e Target Folder em `ProjectSettings/HopperSettings.json` (Git do jogo); servidor fixo em produção, override Local/Custom só em instalação `file:`; confirmação ao trocar; aviso de projeto sem acesso; migração das chaves da v0.7 oferecida, nunca automática. Só local — nenhuma mudança no web app |
 | `v0.5.0` | 29/set/2026 | Sincronia de verdade: estado **Missing** (`×`) para arquivo apagado localmente, detectado na hora pelo `PipelineAssetWatcher`; **Reimport** (versão publicada, com o GUID original) e **Forget**; overlay no Scene View com sapinho, resumo e refresh; cache do feed em `SessionState` (os ícones sobrevivem ao compile sem a janela aberta); erro do refresh visível; `local_path` no manifesto. Só local — nenhuma mudança no web app |
 | `v0.4.0` | 28/set/2026 | Visual novo da janela: lista em card com thumbnail, badge colorido por tipo e um botão por Item — **Import** (nada local), **Update** (versão nova, subtítulo `v2 → v3`) ou "✓ Imported" (os em dia ficam num foldout). Thumbnail via `/api/assets/{id}/thumbnail`; contra um servidor sem `thumbnail_url`, só mostra o placeholder |
 | `v0.3.0` | 28/set/2026 | Import por Item com `engine_path` do servidor, mover de volta com confirmação, `PathSafety` nos dois fluxos, commit hash real, token renovado antes do download, labels. Precisa do web com a Fase 4 (`/api/items/published`); contra um servidor sem ela, a lista de Itens só fica vazia |
@@ -407,7 +431,7 @@ A resposta é achatada de propósito — o `JsonUtility` não desserializa `Dict
 }
 ```
 
-As permissões ficam no `EditorPrefs` (`PipelineTool.Permissions`, separadas por vírgula) e são consultadas por `PipelineSettings.Can("unity.import")`. Como são **por projeto**, trocar o projeto no dropdown dispara um novo fetch.
+As permissões ficam no `EditorPrefs` (`PipelineTool.Permissions`, separadas por vírgula, com o projeto de origem em `PipelineTool.PermissionsProject`) e são consultadas por `PipelineSettings.Can("unity.import")`. Como são **por projeto**, trocar o projeto no dropdown dispara um novo fetch, e cache de outro projeto vale como "não carregou".
 
 O botão **Import** fica desabilitado sem `unity.import`, e `ImportAsync` também corta na entrada. Isso é só conveniência: quem decide é o servidor, em `PATCH /api/assets/[id]/mark-imported`, que responde 403.
 
@@ -417,4 +441,4 @@ O botão **Import** fica desabilitado sem `unity.import`, e `ImportAsync` també
 
 `PipelineSettings.Can()` devolve `true` enquanto as permissões não chegaram — sessão recém-restaurada, rede fora — para que a janela não fique inutilizável por falta de dado. Por isso existe a flag separada `PipelineTool.PermissionsLoaded`: sem ela, um usuário que realmente não tem permissão nenhuma (lista vazia) seria confundido com "ainda não carregou" e veria tudo habilitado.
 
-`ClearSession()` limpa as três chaves (`Permissions`, `PermissionsLoaded`, `IsAdmin`) junto com os tokens.
+`ClearSession()` limpa as chaves de permissão (`Permissions`, `PermissionsProject`, `PermissionsLoaded`, `IsAdmin`) junto com os tokens — e não mexe no projeto, que é do arquivo compartilhado.

@@ -60,10 +60,11 @@ namespace AntiGravity.PipelineTool.Editor
         private ServerEnvironment _serverEnv;
         private string            _customUrl  = "";
         private string            _importPath;
+        private bool              _showDevServer;
 
-        // Project dropdown
+        // Project dropdown. The selection is not kept here: it is read from the shared
+        // file on every draw, so a git pull that changes it shows up right away.
         private ProjectInfo[] _projects       = Array.Empty<ProjectInfo>();
-        private int           _projectIndex;
         private bool          _projectsLoaded;
 
         // ------------------------------------------------------------------ //
@@ -92,6 +93,7 @@ namespace AntiGravity.PipelineTool.Editor
             _serverEnv  = PipelineSettings.SelectedEnvironment;
             _customUrl  = PipelineSettings.CustomApiUrl;
             _importPath = PipelineSettings.ImportTargetPath;
+            _showDevServer = PipelineSettings.IsDevServerActive;
 
             if (PipelineSettings.IsLoggedIn && !_projectsLoaded)
                 _ = LoadProjectsAsync();
@@ -125,6 +127,8 @@ namespace AntiGravity.PipelineTool.Editor
 
         private void OnGUI()
         {
+            DrawDevServerBanner();
+
             if (!PipelineSettings.IsLoggedIn)
             {
                 DrawLoginScreen();
@@ -176,12 +180,26 @@ namespace AntiGravity.PipelineTool.Editor
         }
 
         // ------------------------------------------------------------------ //
-        // Server picker (login screen + settings tab)
+        // Server (login screen + settings tab)
+        //
+        // Production for everyone, fixed in code (v0.8). The Local/Custom override exists only
+        // on a local (file:) install — internal testing — and is saved on this machine only.
 
         private static readonly string[] ServerLabels = { "Local  (localhost:3000)", "Production", "Custom" };
 
         private void DrawServerPicker()
         {
+            if (!PipelineSettings.IsDevInstall)
+            {
+                EditorGUILayout.LabelField("Server", "Production");
+                return;
+            }
+
+            _showDevServer = EditorGUILayout.Foldout(_showDevServer,
+                $"Server: {_serverEnv}  (developer override — local install only)", true);
+            if (!_showDevServer) return;
+
+            EditorGUI.indentLevel++;
             EditorGUI.BeginChangeCheck();
             var newEnv = (ServerEnvironment)EditorGUILayout.Popup("Server", (int)_serverEnv, ServerLabels);
             if (EditorGUI.EndChangeCheck())
@@ -206,6 +224,17 @@ namespace AntiGravity.PipelineTool.Editor
                 EditorGUILayout.TextField("URL", url);
                 EditorGUI.EndDisabledGroup();
             }
+            EditorGUI.indentLevel--;
+        }
+
+        // Every tab: importing from a dev server into a game repo is what mixed production
+        // and staging entries in one manifest before.
+        private static void DrawDevServerBanner()
+        {
+            if (!PipelineSettings.IsDevServerActive) return;
+            EditorGUILayout.HelpBox(
+                $"Dev server: {PipelineSettings.ApiBaseUrl} — not production. Imports from here do not match the team's Hopper.",
+                MessageType.Warning);
         }
 
         // ------------------------------------------------------------------ //
@@ -259,8 +288,8 @@ namespace AntiGravity.PipelineTool.Editor
             if (_assets.Count == 0 && _items.Count == 0 && !_busy)
             {
                 var msg = string.IsNullOrEmpty(PipelineSettings.ProjectId)
-                    ? "Select a project in Settings, then click Refresh."
-                    : "No approved assets for this project.";
+                    ? "This Unity project is not linked to Hopper yet. Pick the project in Settings (shared with the team), then click Refresh."
+                    : NoAccessMessage() ?? "No approved assets for this project.";
                 EditorGUILayout.HelpBox(msg, MessageType.Info);
                 return;
             }
@@ -541,71 +570,175 @@ namespace AntiGravity.PipelineTool.Editor
 
             EditorGUILayout.Space(12);
 
-            // Connection
-            EditorGUILayout.LabelField("API Connection", EditorStyles.boldLabel);
-            DrawServerPicker();
+            EditorGUILayout.Space(12);
 
-            EditorGUILayout.Space(8);
+            // ---- Shared with the team: ProjectSettings/HopperSettings.json ----
+            EditorGUILayout.LabelField("This Unity project  ·  shared with the team (Git)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                $"Saved in {HopperProjectSettings.RelativePath}. Commit it so everyone imports from the same place.",
+                EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.Space(4);
 
-            // Project
-            EditorGUILayout.LabelField("Project", EditorStyles.boldLabel);
-            if (_projects.Length == 0)
-            {
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(
-                    _projectsLoaded ? "No projects found for this account." : "Loading projects…",
-                    EditorStyles.miniLabel);
-                if (_projectsLoaded && GUILayout.Button("Reload", GUILayout.Width(60)))
-                    _ = LoadProjectsAsync();
-                EditorGUILayout.EndHorizontal();
-            }
-            else
-            {
-                var names = new string[_projects.Length];
-                for (var i = 0; i < _projects.Length; i++)
-                    names[i] = _projects[i].name;
+            DrawLegacyMigrationBanner();
+            DrawProjectPicker();
 
-                var newIndex = EditorGUILayout.Popup("Project", _projectIndex, names);
-                if (newIndex != _projectIndex)
-                {
-                    _projectIndex = newIndex;
-                    PipelineSettings.ProjectId   = _projects[newIndex].id;
-                    PipelineSettings.ProjectName = _projects[newIndex].name;
-                    // As permissões são por projeto — trocar de projeto pode mudar a função.
-                    _ = LoadPermissionsAsync();
-                }
-            }
-
-            EditorGUILayout.Space(8);
-
-            // Import path
-            EditorGUILayout.LabelField("Import", EditorStyles.boldLabel);
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
             _importPath = EditorGUILayout.TextField("Target Folder", _importPath);
+            var targetChanged = !PathSafety.SamePath(_importPath, PipelineSettings.ImportTargetPath);
+            GUI.enabled = targetChanged;
+            if (GUILayout.Button("Save", GUILayout.Width(50)))
+                SaveTargetFolder();
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.Space(8);
+            EditorGUILayout.Space(12);
 
-            // Sync status
-            EditorGUILayout.LabelField("Sync Status", EditorStyles.boldLabel);
+            // ---- This machine only: EditorPrefs ----
+            EditorGUILayout.LabelField("This machine only", EditorStyles.boldLabel);
+            DrawServerPicker();
             EditorGUI.BeginChangeCheck();
             var autoRefreshSync = EditorGUILayout.Toggle(
-                "Auto-refresh on Editor start", PipelineSettings.AutoRefreshSyncOnStartup);
+                "Auto-refresh sync on start", PipelineSettings.AutoRefreshSyncOnStartup);
             if (EditorGUI.EndChangeCheck())
                 PipelineSettings.AutoRefreshSyncOnStartup = autoRefreshSync;
 
-            EditorGUILayout.Space(12);
-            if (GUILayout.Button("Save Settings"))
+            EditorGUILayout.Space(8);
+            DrawStatusBar();
+        }
+
+        private int CurrentProjectIndex()
+        {
+            var id = PipelineSettings.ProjectId;
+            if (string.IsNullOrEmpty(id)) return -1;
+            for (var i = 0; i < _projects.Length; i++)
+                if (_projects[i].id == id) return i;
+            return -1;
+        }
+
+        /// <summary>
+        /// The shared file names a project this account cannot see (not a member). Null when
+        /// fine or not known yet. The file is never changed because of it.
+        /// </summary>
+        private string NoAccessMessage()
+        {
+            if (!_projectsLoaded || string.IsNullOrEmpty(PipelineSettings.ProjectId) || CurrentProjectIndex() >= 0)
+                return null;
+            var name = string.IsNullOrEmpty(PipelineSettings.ProjectName) ? PipelineSettings.ProjectId : PipelineSettings.ProjectName;
+            return $"This Unity project is linked to the Hopper project \"{name}\", which your account cannot access. " +
+                   "Ask a producer or admin to add you to it in Hopper.";
+        }
+
+        private void DrawProjectPicker()
+        {
+            var noAccess = NoAccessMessage();
+            if (noAccess != null)
+                EditorGUILayout.HelpBox(noAccess, MessageType.Warning);
+
+            if (_projects.Length == 0)
             {
-                try
-                {
-                    PipelineSettings.ImportTargetPath = PathSafety.NormalizeTarget(_importPath);
-                    _importPath = PipelineSettings.ImportTargetPath;
-                    SetStatus("Settings saved.", false);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    SetStatus(ex.Message, true);
-                }
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Hopper Project",
+                    _projectsLoaded ? "No projects found for this account." : "Loading projects…");
+                if (_projectsLoaded && GUILayout.Button("Reload", GUILayout.Width(60)))
+                    _ = LoadProjectsAsync();
+                EditorGUILayout.EndHorizontal();
+                return;
             }
+
+            // Not in the list (no access, or none chosen yet): a leading entry says so
+            // instead of silently showing the first project as if it were the linked one.
+            var current = CurrentProjectIndex();
+            var offset  = current < 0 ? 1 : 0;
+            var names   = new string[_projects.Length + offset];
+            if (offset == 1)
+                names[0] = string.IsNullOrEmpty(PipelineSettings.ProjectId)
+                    ? "— choose a project —"
+                    : $"{(string.IsNullOrEmpty(PipelineSettings.ProjectName) ? "?" : PipelineSettings.ProjectName)} (no access)";
+            for (var i = 0; i < _projects.Length; i++)
+                names[i + offset] = _projects[i].name;
+
+            var shown    = current < 0 ? 0 : current;
+            var selected = EditorGUILayout.Popup("Hopper Project", shown, names);
+            if (selected == shown) return;
+            var picked = selected - offset;
+            if (picked < 0) return;
+
+            var project = _projects[picked];
+            var replacing = !string.IsNullOrEmpty(PipelineSettings.ProjectId);
+            if (EditorUtility.DisplayDialog(
+                    replacing ? "Change the Hopper project for everyone?" : "Link this Unity project to Hopper?",
+                    (replacing
+                        ? $"This Unity project will import from \"{project.name}\" instead of \"{PipelineSettings.ProjectName}\" — for the whole team.\n\n"
+                        : $"This Unity project will import from \"{project.name}\" — for the whole team.\n\n") +
+                    $"The choice is saved in {HopperProjectSettings.RelativePath}. Commit it.",
+                    replacing ? "Change" : "Link", "Cancel"))
+            {
+                HopperProjectSettings.SetProject(project.id, project.name);
+                OnProjectChanged();
+            }
+            // A modal dialog mid-OnGUI leaves the layout groups unbalanced: end this frame.
+            GUIUtility.ExitGUI();
+        }
+
+        private void OnProjectChanged()
+        {
+            _assets = new List<ApprovedAsset>();
+            _items  = new List<PublishedItem>();
+            _moves  = new List<PlannedMove>();
+            _itemStates.Clear();
+            SetStatus($"Linked to \"{PipelineSettings.ProjectName}\". Commit {HopperProjectSettings.RelativePath}, then Refresh.", false);
+            // As permissões são por projeto — trocar de projeto pode mudar a função.
+            _ = LoadPermissionsAsync();
+        }
+
+        private void SaveTargetFolder()
+        {
+            string target;
+            try { target = PathSafety.NormalizeTarget(_importPath); }
+            catch (InvalidOperationException ex) { SetStatus(ex.Message, true); return; }
+
+            var oldTarget   = PipelineSettings.ImportTargetPath;
+            var oldManifest = Path.Combine(oldTarget, ".pipeline-manifest.json");
+            var message = $"Imports for the whole team will go to \"{target}\". Saved in {HopperProjectSettings.RelativePath} — commit it.";
+            if (File.Exists(oldManifest))
+                message += $"\n\nFiles already imported and the sync manifest stay in \"{oldTarget}\": Hopper will not see them in the new folder. " +
+                           "To keep them, move the folder in the Unity Project window instead (it keeps the GUIDs).";
+            if (EditorUtility.DisplayDialog("Change the Target Folder for everyone?", message, "Change", "Cancel"))
+            {
+                HopperProjectSettings.SetImportTargetPath(target);
+                _importPath = target;
+                PipelineManifest.Reload();
+                PipelineSyncStatus.Recompute();
+                SetStatus($"Target Folder saved. Commit {HopperProjectSettings.RelativePath}.", false);
+            }
+            GUIUtility.ExitGUI();
+        }
+
+        // v0.7 kept project and Target Folder per machine. Offered, never applied on its own:
+        // EditorPrefs is shared by every Unity project here, the values may be another game's.
+        private void DrawLegacyMigrationBanner()
+        {
+            var legacy = PipelineSettings.LegacyProjectSettings;
+            if (legacy == null) return;
+            var (id, name, target) = legacy.Value;
+
+            EditorGUILayout.HelpBox(
+                "This Unity project is not linked to Hopper yet. This machine has the settings from the previous plugin version " +
+                $"(last used in any Unity project here):\n  Project: {(string.IsNullOrEmpty(name) ? id : name)}\n  Target Folder: {target}\n" +
+                "Use them for this Unity project, or pick a project below.",
+                MessageType.Info);
+            if (!GUILayout.Button("Use these for this Unity project")) return;
+
+            string normalized;
+            try { normalized = PathSafety.NormalizeTarget(target); }
+            catch (InvalidOperationException) { normalized = HopperProjectSettings.DefaultTargetPath; }
+
+            HopperProjectSettings.SetAll(id, name, normalized);
+            _importPath = normalized;
+            PipelineManifest.Reload();
+            PipelineSyncStatus.Recompute();
+            OnProjectChanged();
         }
 
         // ------------------------------------------------------------------ //
@@ -640,8 +773,9 @@ namespace AntiGravity.PipelineTool.Editor
         {
             try
             {
-                var perms = await PipelineApiClient.GetPermissionsAsync(PipelineSettings.ProjectId);
-                PipelineSettings.StorePermissions(perms?.allowed, perms?.is_admin ?? false);
+                var projectId = PipelineSettings.ProjectId;
+                var perms = await PipelineApiClient.GetPermissionsAsync(projectId);
+                PipelineSettings.StorePermissions(projectId, perms?.allowed, perms?.is_admin ?? false);
             }
             catch (Exception ex)
             {
@@ -662,19 +796,18 @@ namespace AntiGravity.PipelineTool.Editor
                 _projects       = await PipelineApiClient.GetUserProjectsAsync();
                 _projectsLoaded = true;
 
-                // Restore previously selected project index
-                var savedId = PipelineSettings.ProjectId;
-                _projectIndex = 0;
-                for (var i = 0; i < _projects.Length; i++)
+                // The selection comes from the shared file; nothing to restore here.
+                // Not linked yet, no v0.7 settings to offer and a single choice: link it,
+                // and say it is a shared file. Never when the file exists — the team chose.
+                if (!HopperProjectSettings.Exists && PipelineSettings.LegacyProjectSettings == null && _projects.Length == 1)
                 {
-                    if (_projects[i].id == savedId) { _projectIndex = i; break; }
+                    HopperProjectSettings.SetProject(_projects[0].id, _projects[0].name);
+                    OnProjectChanged();
                 }
-
-                // If only one project, auto-select it
-                if (_projects.Length == 1 && string.IsNullOrEmpty(PipelineSettings.ProjectId))
+                else
                 {
-                    PipelineSettings.ProjectId   = _projects[0].id;
-                    PipelineSettings.ProjectName = _projects[0].name;
+                    var noAccess = NoAccessMessage();
+                    if (noAccess != null) SetStatus(noAccess, true);
                 }
             }
             catch (Exception ex)
@@ -695,7 +828,6 @@ namespace AntiGravity.PipelineTool.Editor
             _moves          = new List<PlannedMove>();
             _projects       = Array.Empty<ProjectInfo>();
             _projectsLoaded = false;
-            _projectIndex   = 0;
             _itemStates.Clear();
             ClearThumbnails();
             SetStatus("", false);
@@ -704,14 +836,20 @@ namespace AntiGravity.PipelineTool.Editor
 
         private async Task RefreshAsync()
         {
+            // Without a project the feed would be every project's assets, imported into one
+            // game. Since v0.8 the link is the team's choice, in the shared file.
+            if (string.IsNullOrEmpty(PipelineSettings.ProjectId))
+            {
+                SetStatus("Link this Unity project to a Hopper project in Settings first.", true);
+                return;
+            }
+
             _busy = true;
             SetStatus("Fetching approved assets…", false);
 
             try
             {
-                var projectId = string.IsNullOrEmpty(PipelineSettings.ProjectId)
-                    ? null
-                    : PipelineSettings.ProjectId;
+                var projectId = PipelineSettings.ProjectId;
 
                 var response = await PipelineApiClient.GetApprovedAssetsAsync(projectId);
                 _assets = new List<ApprovedAsset>(response.assets ?? Array.Empty<ApprovedAsset>());

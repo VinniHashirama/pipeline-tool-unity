@@ -20,7 +20,7 @@ Abra **Window > Package Manager**, clique no botão **+** no canto superior esqu
 Escolha **"Add package from git URL…"** e cole:
 
 ```
-https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.7.0
+https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.8.0
 ```
 
 Para fixar em uma versão específica, adicione `#v<semver>` ao final. Omita a tag para usar sempre o latest `main` (apenas em dev).
@@ -34,7 +34,7 @@ Escolha **"Add package from disk…"** e navegue até o `package.json` dentro da
 ```json
 {
   "dependencies": {
-    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.7.0"
+    "com.antigravity.pipeline-tool": "https://github.com/VinniHashirama/pipeline-tool-unity.git#v0.8.0"
   }
 }
 ```
@@ -55,30 +55,29 @@ Para desenvolvimento local:
 
 Abra **Hopper > Import Window** na barra de menus do Unity.
 
-Na primeira abertura, o tool exibe a **tela de login**.
+Na primeira abertura, o tool exibe a **tela de login** (e-mail e senha da conta do Hopper). O servidor é
+sempre **Production** — não há o que escolher.
 
-### Tela de login
+### Onde cada configuração fica (v0.8)
 
-| Campo | Descrição |
-|---|---|
-| **Server** | Dropdown: **Local** (localhost:3000) · **Production** (pipeline-tool-web.vercel.app) · **Custom** (campo livre) |
-| **Email** | Email da conta no Hopper (mesma usada na web app) |
-| **Password** | Senha da conta |
+| Configuração | Onde | Quem vê |
+|---|---|---|
+| **Hopper Project** e **Target Folder** | `ProjectSettings/HopperSettings.json` — **commitar** | O time todo: quem clona o repo do jogo já vem no projeto e na pasta certos |
+| Login (tokens), usuário, cache de permissões | `EditorPrefs` | Só esta máquina. Nunca no repositório |
+| Auto-refresh sync on start | `EditorPrefs` | Só esta máquina |
+| Servidor de dev (Local/Custom) | `EditorPrefs` | Só aparece com o plugin instalado por `file:` (teste interno) |
 
-Escolha o servidor antes de inserir as credenciais. A seleção é salva automaticamente no `EditorPrefs` — não precisa reconfigurar ao reabrir o Editor.
-
-Após o login, o tool busca automaticamente os projetos do usuário.
+O arquivo compartilhado não guarda nada pessoal nem segredo: só id e nome do projeto e a pasta.
 
 ### Aba Settings (após login)
 
-| Campo | Descrição |
-|---|---|
-| Signed in as | Nome do usuário logado + botão **Sign Out** |
-| Server | Mesmo picker do login — pode ser alterado sem sair |
-| Project | Dropdown com os projetos disponíveis — salvo automaticamente ao selecionar |
-| Target Folder | Pasta destino no projeto Unity (ex: `Assets/ImportedAssets`) · salvo com **Save Settings** |
+- **This Unity project · shared with the team (Git)** — **Hopper Project** (trocar pede confirmação, porque
+  muda para todo mundo) e **Target Folder** (**Save**). Depois de mudar, commite o `HopperSettings.json`.
+- **This machine only** — servidor (só leitura, ou o override de dev numa instalação local) e auto-refresh.
 
-Todas as configurações ficam no `EditorPrefs` — por usuário, por máquina. Nunca commitadas no repositório.
+Se o projeto ligado não está entre os da sua conta, a janela avisa ("your account cannot access") e não troca
+nada: peça acesso no Hopper. Quem vem da v0.7 vê um aviso para reaproveitar o projeto e a pasta que a máquina
+guardava — vale conferir, porque o `EditorPrefs` é da máquina e pode ser de outro jogo.
 
 ---
 
@@ -114,13 +113,13 @@ O tool usa **JWT Supabase** (email + senha) — as mesmas credenciais da web app
 ```bash
 # Edite "version" em package.json, depois:
 git add package.json package.json.meta
-git commit -m "chore: bump version to 0.7.0"
+git commit -m "chore: bump version to 0.8.0"
 git push
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.8.0
+git push origin v0.8.0
 ```
 
-No Unity, atualize `manifest.json` para a tag nova (ex.: `#v0.7.0`) — o Package Manager baixa a nova versão automaticamente.
+No Unity, atualize `manifest.json` para a tag nova (ex.: `#v0.8.0`) — o Package Manager baixa a nova versão automaticamente.
 
 A cada tag, atualize também `docs/plugins.json` e `docs/novidades.md` no repositório web (aba Docs) e as linhas de instalação deste README.
 
@@ -139,7 +138,8 @@ com.antigravity.pipeline-tool/
         │   ├── ApprovedAsset.cs     — response shape de GET /api/assets/approved
         │   ├── AuthModels.cs        — LoginRequest, AuthResponse, ProjectInfo e afins
         │   └── ImportResult.cs      — response shape de PATCH /mark-imported
-        ├── PipelineSettings.cs      — EditorPrefs: ambiente, tokens, projeto, pasta destino
+        ├── PipelineSettings.cs      — EditorPrefs: sessão, permissões, override de dev; repassa projeto e pasta
+        ├── HopperProjectSettings.cs — ProjectSettings/HopperSettings.json: projeto e pasta, no Git
         ├── PipelineApiClient.cs     — chamadas HTTP assíncronas (login, refresh, projetos, assets)
         ├── AssetDownloader.cs       — download via proxy + AssetDatabase refresh
         └── PipelineImportWindow.cs  — EditorWindow: login, aba Assets, aba Settings

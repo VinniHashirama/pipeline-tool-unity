@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.0] — 2026-11-13
+
+### Changed
+- **Projeto e Target Folder vão para o Git.** Ficam em `ProjectSettings/HopperSettings.json`, commitado com o
+  jogo: quem clona já vem no projeto Hopper e na pasta certos, e ninguém importa de outro projeto no mesmo
+  manifesto. Antes ficavam no `EditorPrefs`, que é da máquina e valia para todos os projetos Unity dela.
+- **Servidor fixo em produção.** O seletor Local/Production/Custom saiu da tela de login. O override de dev só
+  aparece com o plugin instalado por `file:`, fica só na máquina e mostra uma faixa amarela em todas as abas.
+  Quem tinha "Local" salvo passa a ir para produção (o default antigo era Local).
+- Trocar o projeto ou a pasta pede confirmação ("muda para o time todo") e lembra de commitar o arquivo.
+- Sign Out não esquece mais o projeto (é do projeto Unity, não da sessão).
+- O cache de permissões guarda de qual projeto veio; o de outro projeto conta como "não carregou".
+- Refresh sem projeto ligado é recusado (antes trazia os assets de todos os projetos).
+
+### Added
+- Aviso quando o projeto ligado não está entre os da conta, em vez de mostrar o primeiro da lista como se
+  fosse o ligado.
+- Migração da v0.7: sem o arquivo, a aba Settings oferece usar o projeto e a pasta que a máquina guardava.
+  Nunca aplica sozinha. Com um projeto só na conta e nada a migrar, liga direto (e avisa para commitar).
+
+### Notes
+- Depois de atualizar, alguém do time liga o projeto uma vez e commita `ProjectSettings/HopperSettings.json`.
+
 ## [0.7.0] — 2026-11-12
 
 ### Added
